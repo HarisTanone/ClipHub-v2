@@ -11,6 +11,7 @@ import { SocialAccounts } from "@/pages/SocialAccounts";
 import { SocialEngagement } from "@/pages/SocialEngagement";
 import { EngagementStudio } from "@/pages/EngagementStudio";
 import { VideoGeneratorPage } from "@/pages/VideoGenerator";
+import { GeneratedImagesPage } from "@/pages/GeneratedImages";
 import { FacebookCallback } from "@/pages/FacebookCallback";
 import { TikTokCallback } from "@/pages/TikTokCallback";
 import { SocialCallback } from "@/pages/SocialCallback";
@@ -100,6 +101,7 @@ export default function App() {
             }
           />
           <Route path="video-generator" element={<VideoGeneratorPage />} />
+          <Route path="generated-images" element={<GeneratedImagesPage />} />
           <Route path="settings" element={<Navigate to="/settings/general" replace />} />
           <Route path="settings/hermes" element={<Navigate to="/settings/hermes/autopilot" replace />} />
           <Route path="settings/hermes/:subSection" element={<Settings />} />

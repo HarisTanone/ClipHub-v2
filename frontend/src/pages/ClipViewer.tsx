@@ -89,6 +89,8 @@ export function ClipViewer() {
 
   // Whisper transcript modal & copy states
   const [transcriptModalOpen, setTranscriptModalOpen] = useState(false);
+  const [liveTranscriptPayload, setLiveTranscriptPayload] = useState<any | null>(null);
+  const [isLoadingTranscript, setIsLoadingTranscript] = useState(false);
   const [copiedTranscriptJson, setCopiedTranscriptJson] = useState(false);
   const [copiedTranscriptText, setCopiedTranscriptText] = useState(false);
 
@@ -295,21 +297,39 @@ export function ClipViewer() {
     finally { setIsRestyling(false); setRestyleProgress(null); }
   }
 
-  const transcriptPayload = clip ? {
+  useEffect(() => {
+    if (!transcriptModalOpen || !jobId) return;
+    setIsLoadingTranscript(true);
+    jobs.getClipTranscript(jobId, clipRank)
+      .then((res: any) => {
+        const payload = res?.data || res;
+        if (payload && (payload.words || payload.full_text)) {
+          setLiveTranscriptPayload(payload);
+        }
+      })
+      .catch((e: any) => {
+        console.warn("getClipTranscript error:", e);
+      })
+      .finally(() => {
+        setIsLoadingTranscript(false);
+      });
+  }, [transcriptModalOpen, jobId, clipRank]);
+
+  const activeTranscript = liveTranscriptPayload || (clip ? {
     job_id: jobId,
     clip_rank: clipRank,
     start: clip.start,
     end: clip.end,
     duration: clip.duration,
     hook: clip.hook,
-    full_text: (clip.words || []).map((w) => w.word).join(" ").trim(),
+    full_text: (clip.words || []).map((w) => w.word).join(" ").trim() || (clip as any).subtitle || "",
     word_count: clip.words?.length || 0,
     words: clip.words || [],
-  } : null;
+  } : null);
 
   const handleCopyTranscriptJson = () => {
-    if (!transcriptPayload) return;
-    navigator.clipboard?.writeText(JSON.stringify(transcriptPayload, null, 2))
+    if (!activeTranscript) return;
+    navigator.clipboard?.writeText(JSON.stringify(activeTranscript, null, 2))
       .then(() => {
         setCopiedTranscriptJson(true);
         toast.success("Transkrip JSON berhasil disalin!");
@@ -321,8 +341,8 @@ export function ClipViewer() {
   };
 
   const handleCopyTranscriptText = () => {
-    if (!transcriptPayload?.full_text) return;
-    navigator.clipboard?.writeText(transcriptPayload.full_text)
+    if (!activeTranscript?.full_text) return;
+    navigator.clipboard?.writeText(activeTranscript.full_text)
       .then(() => {
         setCopiedTranscriptText(true);
         toast.success("Teks transkrip berhasil disalin!");
@@ -334,8 +354,8 @@ export function ClipViewer() {
   };
 
   const handleDownloadTranscriptJson = () => {
-    if (!transcriptPayload) return;
-    const jsonStr = JSON.stringify(transcriptPayload, null, 2);
+    if (!activeTranscript) return;
+    const jsonStr = JSON.stringify(activeTranscript, null, 2);
     const blob = new Blob([jsonStr], { type: "application/json;charset=utf-8" });
     const url = URL.createObjectURL(blob);
     const link = document.createElement("a");
@@ -538,9 +558,11 @@ export function ClipViewer() {
                 variant="outline"
                 size="xs"
                 onClick={() => setTranscriptModalOpen(true)}
-                icon={<FileText className="h-3 w-3" />}
+                icon={<FileText className="h-3 w-3 text-violet-400" />}
+                className="border-violet-500/30 text-violet-200 hover:bg-violet-950/20"
+                title="Buka, salin, atau unduh transkrip Whisper JSON dengan word timestamps"
               >
-                Transkrip JSON
+                Transkrip Whisper JSON
               </Button>
               {rawUrl && <a href={rawUrl} download><Button variant="outline" size="xs" icon={<Download className="h-3 w-3" />}>Raw</Button></a>}
               {finalDownloadUrl && <a href={finalDownloadUrl} download><Button variant="primary" size="xs" icon={<Download className="h-3 w-3" />}>Final</Button></a>}
@@ -943,30 +965,30 @@ export function ClipViewer() {
         <Modal
           open={transcriptModalOpen}
           onClose={() => setTranscriptModalOpen(false)}
-          title={`Transkrip Whisper JSON — Clip #${clipRank}`}
+          title={`Transkrip Whisper JSON — Klip #${clipRank}`}
           size="lg"
         >
           <div className="space-y-4">
             {/* Summary Chips */}
             <div className="flex flex-wrap items-center gap-2 text-[11px] text-zinc-400">
               <span className="rounded-md border border-zinc-800 bg-zinc-900/80 px-2 py-0.5 font-mono text-zinc-300">
-                Clip #{clipRank}
+                Klip #{clipRank}
               </span>
               <span className="rounded-md border border-zinc-800 bg-zinc-900/80 px-2 py-0.5 font-mono text-zinc-300">
-                {clip.words?.length || 0} kata
+                {activeTranscript?.words?.length ?? (clip.words?.length || 0)} kata
               </span>
               <span className="rounded-md border border-zinc-800 bg-zinc-900/80 px-2 py-0.5 font-mono text-zinc-300">
-                {clip.start?.toFixed(1)}s → {clip.end?.toFixed(1)}s ({formatDuration(clip.duration)})
+                {(activeTranscript?.start ?? clip.start)?.toFixed(1)}s → {(activeTranscript?.end ?? clip.end)?.toFixed(1)}s ({formatDuration(activeTranscript?.duration ?? clip.duration)})
               </span>
-              {clip.hook && (
-                <span className="rounded-md border border-zinc-800 bg-zinc-900/80 px-2 py-0.5 text-zinc-400 max-w-xs truncate" title={clip.hook}>
-                  Hook: {clip.hook}
+              {(activeTranscript?.hook || clip.hook) && (
+                <span className="rounded-md border border-zinc-800 bg-zinc-900/80 px-2 py-0.5 text-zinc-400 max-w-xs truncate" title={activeTranscript?.hook || clip.hook}>
+                  Hook: {activeTranscript?.hook || clip.hook}
                 </span>
               )}
             </div>
 
             {/* Full text preview */}
-            {transcriptPayload?.full_text && (
+            {activeTranscript?.full_text && (
               <div className="rounded-lg border border-zinc-800 bg-zinc-950/70 p-3">
                 <div className="flex items-center justify-between mb-1.5">
                   <span className="text-[11px] font-medium text-zinc-400">Teks Transkrip Lengkap</span>
@@ -980,7 +1002,7 @@ export function ClipViewer() {
                   </button>
                 </div>
                 <p className="text-xs text-zinc-300 leading-relaxed font-sans max-h-24 overflow-y-auto select-all">
-                  {transcriptPayload.full_text}
+                  {activeTranscript.full_text}
                 </p>
               </div>
             )}
@@ -992,11 +1014,20 @@ export function ClipViewer() {
                   <FileText className="h-3.5 w-3.5 text-violet-400" />
                   <span className="font-mono text-[10px] text-zinc-400">transcript_{jobId}_clip_{clipRank}.json</span>
                 </div>
-                <span className="text-[10px] text-zinc-500 font-mono">{clip.words?.length || 0} timestamps</span>
+                <span className="text-[10px] text-zinc-500 font-mono">
+                  {isLoadingTranscript ? "Memuat..." : `${activeTranscript?.words?.length || 0} timestamps kata`}
+                </span>
               </div>
-              <pre className="max-h-80 overflow-y-auto overflow-x-auto p-3 text-[11px] font-mono text-zinc-300 leading-relaxed select-all">
-                {JSON.stringify(transcriptPayload, null, 2)}
-              </pre>
+              {isLoadingTranscript ? (
+                <div className="p-8 text-center text-xs text-zinc-500 font-mono flex items-center justify-center gap-2">
+                  <RefreshCw className="h-4 w-4 animate-spin text-violet-400" />
+                  <span>Memuat transkrip Whisper...</span>
+                </div>
+              ) : (
+                <pre className="max-h-80 overflow-y-auto overflow-x-auto p-3 text-[11px] font-mono text-zinc-300 leading-relaxed select-all">
+                  {JSON.stringify(activeTranscript, null, 2)}
+                </pre>
+              )}
             </div>
 
             {/* Footer Actions */}
@@ -1016,7 +1047,7 @@ export function ClipViewer() {
                   onClick={handleDownloadTranscriptJson}
                   icon={<Download className="h-3.5 w-3.5" />}
                 >
-                  Unduh JSON
+                  Unduh File JSON
                 </Button>
               </div>
               <Button

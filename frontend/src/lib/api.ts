@@ -1448,6 +1448,7 @@ export interface AutopilotVideoItem {
   duration_formatted: string;
   thumbnail: string;
   is_processed: boolean;
+  is_upcoming?: boolean;
   index: number;
 }
 
@@ -1531,6 +1532,12 @@ export const autopilotApi = {
     return request<{ success: boolean; data: AutopilotPlaylistVideosResult }>(
       `/api/autopilot/playlist-videos?${q.toString()}`
     );
+  },
+  async resetVideoProcessed(videoId: string): Promise<{ success: boolean; message: string }> {
+    return request<{ success: boolean; message: string }>("/api/autopilot/reset-video-processed", {
+      method: "POST",
+      body: JSON.stringify({ video_id: videoId }),
+    });
   },
   async triggerRun(force: boolean = false): Promise<{
     success: boolean;
@@ -1702,5 +1709,174 @@ export const hermesVideoGenApi = {
     return requestBlob(`/api/video-generator/jobs/${jobId}/thumbnail`);
   },
 };
+
+// ─── AI Image & Visual Post Studio ──────────────────────────────────────────
+
+export interface ImageStudioSlot {
+  name: string;
+  time: string;
+  count: number;
+  enabled: boolean;
+}
+
+export interface ImageStudioSettings {
+  id?: number;
+  user_id?: number;
+  enabled: boolean;
+  topics: string[];
+  daily_slots: ImageStudioSlot[];
+  images_per_session: number;
+  aspect_ratio: string;
+  template_preset: string;
+  font_family: string;
+  model_name?: string;
+  background_source: string;
+  media_type: string;
+  auto_post_enabled: boolean;
+  target_account_ids: string[];
+  music_enabled: boolean;
+  music_track: string;
+  footage_duration_sec: number;
+  today_images_created: number;
+  last_run_date?: string | null;
+  gateway_endpoint?: string;
+  gateway_model?: string;
+  gateway_has_key?: boolean;
+}
+
+export interface CanvasAspectRatioMeta {
+  id: string;
+  name: string;
+  width: number;
+  height: number;
+  description: string;
+  is_builtin: number;
+  is_active: number;
+  sort_order: number;
+}
+
+export interface AccentColorPreset {
+  id: string;
+  name: string;
+  hex: string;
+  is_builtin: number;
+  sort_order: number;
+}
+
+export interface TypographyTemplateMeta {
+  id: string;
+  name: string;
+  vibe: string;
+  primary_font: string;
+  secondary_font: string;
+  recommended_accent: string;
+  layout_type?: string;
+  is_builtin?: number;
+  is_active?: number;
+  sort_order?: number;
+}
+
+export interface ImageStudioRun {
+  id: number;
+  user_id: number;
+  run_date: string;
+  session_name: string;
+  topic: string;
+  prompt: string;
+  quote_hook: string;
+  quote_headline: string;
+  quote_body: string;
+  quote_author: string;
+  quote_handle: string;
+  media_type: string;
+  template_preset: string;
+  font_name: string;
+  aspect_ratio: string;
+  image_urls: string[];
+  video_url?: string | null;
+  social_post_status: string;
+  social_details: any;
+  trigger_source: string;
+  error_message?: string | null;
+  created_at: string;
+}
+
+export interface InstantGeneratePayload {
+  topic?: string;
+  prompt?: string;
+  quote_hook?: string;
+  quote_headline?: string;
+  quote_body?: string;
+  quote_author?: string;
+  quote_handle?: string;
+  accent_color?: string;
+  template_preset?: string;
+  font_family?: string;
+  model_name?: string;
+  aspect_ratio?: string;
+  background_source?: string;
+  media_type?: string;
+  image_count?: number;
+  auto_post?: boolean;
+  target_account_ids?: string[];
+}
+
+export const imageStudioApi = {
+  getSettings: () => request<{ success: boolean; data: ImageStudioSettings }>("/api/image-studio/settings"),
+  updateSettings: (data: Partial<ImageStudioSettings>) => request<{ success: boolean; message: string; data: ImageStudioSettings }>("/api/image-studio/settings", {
+    method: "POST",
+    body: JSON.stringify(data),
+  }),
+  getTemplates: (includeInactive: boolean = false) => request<{ success: boolean; data: TypographyTemplateMeta[] }>(`/api/image-studio/templates${includeInactive ? "?include_inactive=true" : ""}`),
+  createTemplate: (data: Partial<TypographyTemplateMeta>) => request<{ success: boolean; message: string; data: TypographyTemplateMeta }>("/api/image-studio/templates", {
+    method: "POST",
+    body: JSON.stringify(data),
+  }),
+  updateTemplate: (templateId: string, data: Partial<TypographyTemplateMeta>) => request<{ success: boolean; message: string; data: TypographyTemplateMeta }>(`/api/image-studio/templates/${templateId}`, {
+    method: "PUT",
+    body: JSON.stringify(data),
+  }),
+  deleteTemplate: (templateId: string) => request<{ success: boolean; message: string }>(`/api/image-studio/templates/${templateId}`, {
+    method: "DELETE",
+  }),
+  resetTemplates: () => request<{ success: boolean; message: string; data: TypographyTemplateMeta[] }>("/api/image-studio/templates/reset", {
+    method: "POST",
+  }),
+  getFonts: () => request<{ success: boolean; data: string[] }>("/api/image-studio/fonts"),
+  getAspectRatios: () => request<{ success: boolean; data: CanvasAspectRatioMeta[] }>("/api/image-studio/aspect-ratios"),
+  getAccents: () => request<{ success: boolean; data: AccentColorPreset[] }>("/api/image-studio/accents"),
+  suggestContent: (topic: string) => request<{ success: boolean; data: { hook: string; headline: string; body: string; author: string; prompt: string } }>("/api/image-studio/suggest-content", {
+    method: "POST",
+    body: JSON.stringify({ topic }),
+  }),
+  generateInstant: (payload: InstantGeneratePayload) => request<{ success: boolean; message: string; data: any }>("/api/image-studio/generate", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  }),
+  triggerRun: (payload?: { slot_name?: string; topic_override?: string; count_override?: number }) => request<{ success: boolean; message: string; data: any }>("/api/image-studio/run", {
+    method: "POST",
+    body: JSON.stringify(payload || {}),
+  }),
+  getHistory: () => request<{ success: boolean; data: ImageStudioRun[] }>("/api/image-studio/history"),
+  deleteHistoryItem: (runId: number) => request<{ success: boolean; message: string }>(`/api/image-studio/history/${runId}`, {
+    method: "DELETE",
+  }),
+  publishToSocial: (payload: { run_id: number; account_ids: string[]; title?: string; caption?: string }) => request<{ success: boolean; status: string; details: any }>("/api/image-studio/post-social", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  }),
+  uploadMedia: async (formData: FormData) => {
+    const res = await fetch(`${API_BASE}/api/image-studio/upload-media`, {
+      method: "POST",
+      body: formData,
+    });
+    if (!res.ok) {
+      const err = await res.text();
+      throw new Error(err || "Upload failed");
+    }
+    return res.json();
+  },
+};
+
 
 

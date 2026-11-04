@@ -668,7 +668,7 @@ class AutopilotService:
                     "--dump-json",
                     "--flat-playlist",
                     "--playlist-end", str(fetch_limit),
-                    "--extractor-args", "youtube:lang=id",
+                    "--extractor-args", "Youtube:lang=id;youtubetab:lang=id;youtube:lang=id",
                     "--add-header", "Accept-Language: id,id-ID;q=0.9,en;q=0.8",
                     "--no-warnings",
                     "--no-update",
@@ -676,7 +676,7 @@ class AutopilotService:
                 ],
                 capture_output=True,
                 text=True,
-                timeout=25,
+                timeout=45,
             )
             if res.returncode == 0:
                 for line in res.stdout.strip().split("\n"):
@@ -697,11 +697,39 @@ class AutopilotService:
 
                         title = item.get("title", "")
                         url = item.get("url") or f"https://www.youtube.com/watch?v={vid_id}"
-                        dur = int(item.get("duration") or 0)
+
+                        raw_dur = item.get("duration")
+                        live_status = item.get("live_status")
+                        is_upcoming = live_status == "is_upcoming" or (raw_dur is None and not item.get("duration_string"))
+
+                        # Parse duration safely across Indonesian dot-time format (e.g. 36.36 = 36 min 36 sec)
+                        dur = 0
+                        if isinstance(raw_dur, (int, float)) and raw_dur > 0:
+                            if isinstance(raw_dur, float) and not raw_dur.is_integer() and raw_dur < 1000:
+                                mins = int(raw_dur)
+                                secs = round((raw_dur - mins) * 100)
+                                dur = mins * 60 + secs
+                            else:
+                                dur = int(raw_dur)
+                        elif item.get("duration_string"):
+                            d_str = str(item.get("duration_string")).strip().replace(".", ":")
+                            parts = d_str.split(":")
+                            try:
+                                if len(parts) == 3:
+                                    dur = int(parts[0]) * 3600 + int(parts[1]) * 60 + int(parts[2])
+                                elif len(parts) == 2:
+                                    dur = int(parts[0]) * 60 + int(parts[1])
+                                elif len(parts) == 1:
+                                    dur = int(parts[0])
+                            except Exception:
+                                dur = 0
+
                         thumbs = item.get("thumbnails") or []
                         best_thumb = thumbs[-1].get("url") if thumbs else f"https://i.ytimg.com/vi/{vid_id}/hqdefault.jpg"
 
-                        if dur >= 3600:
+                        if is_upcoming:
+                            dur_fmt = "Premiere"
+                        elif dur >= 3600:
                             dur_fmt = f"{dur // 3600}:{(dur % 3600) // 60:02d}:{dur % 60:02d}"
                         elif dur > 0:
                             dur_fmt = f"{dur // 60}:{dur % 60:02d}"
@@ -718,6 +746,7 @@ class AutopilotService:
                             "duration_formatted": dur_fmt,
                             "thumbnail": best_thumb,
                             "is_processed": is_processed,
+                            "is_upcoming": is_upcoming,
                             "index": len(videos) + 1,
                         })
                     except Exception:
@@ -771,7 +800,7 @@ class AutopilotService:
         data = self.get_playlist_or_channel_videos(
             playlist_id=playlist_id if source_type == "playlist" else None,
             channel_url=channel_url if source_type != "playlist" or not playlist_id else None,
-            limit=50,
+            limit=100,
             user_id=user_id,
         )
         videos = data.get("videos") or []
@@ -788,13 +817,18 @@ class AutopilotService:
                 if v.get("id") == manual_target_id:
                     return self._format_candidate_from_video(v)
 
-        # 2. Filter videos by duration if duration > 0 (fallback to all if none match duration)
+        # 2. Exclude upcoming premiere videos and filter by duration
+        playable_videos = [v for v in videos if not v.get("is_upcoming")]
+        if not playable_videos:
+            logger.warning("autopilot: No playable videos available (all upcoming or premieres)")
+            return None
+
         def duration_ok(v):
             d = v.get("duration_sec", 0)
             return d <= 0 or (min_dur <= d <= max_dur)
 
-        filtered_videos = [v for v in videos if duration_ok(v)]
-        eligible_pool = filtered_videos if filtered_videos else videos
+        filtered_videos = [v for v in playable_videos if duration_ok(v)]
+        eligible_pool = filtered_videos if filtered_videos else playable_videos
 
         # 3. Strategy evaluation
         # Strategy 1: 'latest' or 'latest_1' (Selalu ambil video terbaru / vid 1 di index 0)
@@ -836,12 +870,15 @@ class AutopilotService:
         conn = get_dict_connection()
         try:
             cur = conn.cursor()
-            # 1. From jobs table - only completed or actively processing jobs (never failed/timeout)
+            # 1. From jobs table - only completed jobs with clips or actively processing jobs
             try:
                 query = (
                     "SELECT DISTINCT youtube_url FROM jobs "
                     "WHERE youtube_url IS NOT NULL "
-                    "AND status IN ('completed', 'processing', 'rendering', 'queued')"
+                    "AND ("
+                    "  status = 'completed' "
+                    "  OR (status IN ('processing', 'rendering', 'queued') AND updated_at >= datetime('now', '-3 hours'))"
+                    ")"
                 )
                 params: list[Any] = []
                 if user_id is not None:
@@ -852,7 +889,6 @@ class AutopilotService:
                     u = str(r["youtube_url"]).strip()
                     if u:
                         urls.add(u)
-                        # Extract video ID if present
                         vid_m = re.search(r'(?:v=|\/|be\/|shorts\/)([a-zA-Z0-9_-]{11})', u)
                         if vid_m:
                             urls.add(vid_m.group(1))
@@ -879,6 +915,30 @@ class AutopilotService:
 
             return urls
         finally:
+            conn.close()
+
+    def reset_video_processed(self, user_id: int, video_id: str) -> bool:
+        """Reset processed status for a video so it can be re-processed by autopilot."""
+        self._ensure_tables()
+        conn = get_dict_connection()
+        try:
+            cur = conn.cursor()
+            cur.execute("""
+                DELETE FROM autopilot_runs
+                WHERE user_id = ? AND (youtube_url LIKE ? OR youtube_url LIKE ?)
+            """, (user_id, f"%{video_id}%", f"%youtu.be/{video_id}%"))
+            cur.execute("""
+                UPDATE jobs
+                SET status = 'archived'
+                WHERE (user_id = ? OR user_id IS NULL) AND youtube_url LIKE ?
+            """, (user_id, f"%{video_id}%"))
+            conn.commit()
+            return True
+        except Exception as e:
+            logger.error(f"reset_video_processed error: {e}")
+            return False
+        finally:
+            conn.close()
             conn.close()
 
     def pick_best_candidate(self, user_id: int = 1) -> Optional[dict]:

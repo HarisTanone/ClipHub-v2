@@ -612,6 +612,7 @@ export function Settings() {
   const [channelInspectData, setChannelInspectData] = useState<AutopilotChannelInspectResult | null>(null);
   const [isLoadingPlaylistVideos, setIsLoadingPlaylistVideos] = useState<boolean>(false);
   const [playlistVideosData, setPlaylistVideosData] = useState<AutopilotPlaylistVideosResult | null>(null);
+  const [playlistVideosLimit, setPlaylistVideosLimit] = useState<number>(50);
   const [playlistSearchQuery, setPlaylistSearchQuery] = useState<string>("");
   const [videoSearchQuery, setVideoSearchQuery] = useState<string>("");
 
@@ -1211,14 +1212,15 @@ export function Settings() {
     return { connected: false, count: 0, accounts: [] };
   }
 
-  async function loadPlaylistVideosPreview(playlistId?: string, channelUrl?: string) {
+  async function loadPlaylistVideosPreview(playlistId?: string, channelUrl?: string, limitOverride?: number) {
     if (!playlistId && !channelUrl) return;
     setIsLoadingPlaylistVideos(true);
+    const limitToUse = limitOverride || playlistVideosLimit || 50;
     try {
       const res = await autopilotApi.getPlaylistVideos({
         playlist_id: playlistId || undefined,
         channel_url: playlistId ? undefined : (channelUrl || undefined),
-        limit: 50,
+        limit: limitToUse,
       });
       if (res && res.success && res.data) {
         setPlaylistVideosData(res.data);
@@ -1254,25 +1256,70 @@ export function Settings() {
     }
   }
 
+  async function handleSelectStrategy(newStrategy: "latest_2" | "latest_1" | "latest" | "all_playlist") {
+    if (!autopilotSettings) return;
+    const updated: AutopilotSettings = { ...autopilotSettings, video_selection_strategy: newStrategy };
+    setAutopilotSettings(updated);
+    try {
+      const res = await autopilotApi.updateSettings(updated);
+      if (res && res.data) {
+        setAutopilotSettings(res.data);
+        const name =
+          newStrategy === "latest_2"
+            ? "Buffer 2 Video Terakhir"
+            : newStrategy === "latest_1" || newStrategy === "latest"
+            ? "Selalu Ambil Video Terbaru (Direct Latest)"
+            : "Proses Seluruh Video Playlist (Antrean Backlog)";
+        toast.success(`Strategi video harian disimpan: ${name}`);
+      }
+    } catch (e: any) {
+      toast.error("Gagal menyimpan strategi: " + (e?.message || ""));
+    }
+  }
+
+  async function handleResetVideoProcessed(videoId: string) {
+    try {
+      const res = await autopilotApi.resetVideoProcessed(videoId);
+      if (res && res.success) {
+        toast.success(res.message);
+        setPlaylistVideosData((prev) => {
+          if (!prev) return null;
+          return {
+            ...prev,
+            videos: prev.videos.map((v) => (v.id === videoId ? { ...v, is_processed: false } : v)),
+          };
+        });
+      } else {
+        toast.error(res.message || "Gagal mereset status video");
+      }
+    } catch (e: any) {
+      toast.error("Gagal mereset status video: " + (e?.message || ""));
+    }
+  }
+
   const currentTargetInfo = useMemo(() => {
     if (!playlistVideosData?.videos || playlistVideosData.videos.length === 0) return null;
-    const videos = playlistVideosData.videos;
+    const allVideos = playlistVideosData.videos;
     const manualId = autopilotSettings?.manual_target_video_id;
     if (manualId) {
-      const found = videos.find((v) => v.id === manualId);
+      const found = allVideos.find((v) => v.id === manualId);
       if (found) return { video: found, reason: "Pilihan Manual", isManual: true };
     }
+
+    const playable = allVideos.filter((v) => !v.is_upcoming);
+    if (playable.length === 0) return null;
+
     const strat = autopilotSettings?.video_selection_strategy || "latest_2";
     if (strat === "latest_1" || strat === "latest") {
-      const v1 = videos[0];
+      const v1 = playable[0];
       if (v1 && !v1.is_processed) {
         return { video: v1, reason: "Video Terbaru (#1)", isManual: false };
       }
       return null;
     }
     if (strat === "latest_2") {
-      const v1 = videos[0];
-      const v2 = videos[1];
+      const v1 = playable[0];
+      const v2 = playable[1];
       if (v2 && !v2.is_processed) {
         return { video: v2, reason: "Buffer #2 (Terbaru Kedua)", isManual: false };
       }
@@ -1282,7 +1329,7 @@ export function Settings() {
       return null;
     }
     if (strat === "all_playlist") {
-      const unprocessed = videos.filter((v) => !v.is_processed);
+      const unprocessed = playable.filter((v) => !v.is_processed);
       if (unprocessed.length > 0) {
         const oldest = unprocessed[unprocessed.length - 1];
         return { video: oldest, reason: "Antrean Backlog Tertua", isManual: false };
@@ -3915,11 +3962,7 @@ export function Settings() {
                             <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
                               {/* Strategy 1: Buffer 2 Video Terakhir */}
                               <div
-                                onClick={() => {
-                                  if (autopilotSettings) {
-                                    setAutopilotSettings({ ...autopilotSettings, video_selection_strategy: "latest_2" });
-                                  }
-                                }}
+                                onClick={() => handleSelectStrategy("latest_2")}
                                 className={cn(
                                   "p-2.5 rounded-lg border text-xs cursor-pointer transition-all flex flex-col justify-between",
                                   (autopilotSettings?.video_selection_strategy || "latest_2") === "latest_2"
@@ -3950,11 +3993,7 @@ export function Settings() {
 
                               {/* Strategy 2: Selalu Ambil Video Terbaru */}
                               <div
-                                onClick={() => {
-                                  if (autopilotSettings) {
-                                    setAutopilotSettings({ ...autopilotSettings, video_selection_strategy: "latest_1" });
-                                  }
-                                }}
+                                onClick={() => handleSelectStrategy("latest_1")}
                                 className={cn(
                                   "p-2.5 rounded-lg border text-xs cursor-pointer transition-all flex flex-col justify-between",
                                   autopilotSettings?.video_selection_strategy === "latest_1" || autopilotSettings?.video_selection_strategy === "latest"
@@ -3985,11 +4024,7 @@ export function Settings() {
 
                               {/* Strategy 3: Seluruh Playlist Antrean */}
                               <div
-                                onClick={() => {
-                                  if (autopilotSettings) {
-                                    setAutopilotSettings({ ...autopilotSettings, video_selection_strategy: "all_playlist" });
-                                  }
-                                }}
+                                onClick={() => handleSelectStrategy("all_playlist")}
                                 className={cn(
                                   "p-2.5 rounded-lg border text-xs cursor-pointer transition-all flex flex-col justify-between",
                                   autopilotSettings?.video_selection_strategy === "all_playlist"
@@ -4217,164 +4252,218 @@ export function Settings() {
                           </div>
                         ) : (
                           <div className="space-y-1.5 max-h-[460px] overflow-y-auto pr-1">
-                            {(playlistVideosData.videos || [])
-                              .filter((v) =>
-                                !videoSearchQuery ||
-                                v.title.toLowerCase().includes(videoSearchQuery.toLowerCase()) ||
-                                v.id.toLowerCase().includes(videoSearchQuery.toLowerCase())
-                              )
-                              .map((vid) => {
-                                const vIdx = playlistVideosData.videos.findIndex((v) => v.id === vid.id);
-                                const strat = autopilotSettings?.video_selection_strategy || "latest_2";
-                                const manualId = autopilotSettings?.manual_target_video_id || "";
-                                const isManualTarget = Boolean(manualId && vid.id === manualId);
+                            {(() => {
+                              const playableList = (playlistVideosData.videos || []).filter((v) => !v.is_upcoming);
+                              const v1 = playableList[0];
+                              const v2 = playableList[1];
+                              const unprocessedPlayable = playableList.filter((v) => !v.is_processed);
+                              const oldestUnprocessed = unprocessedPlayable.length > 0 ? unprocessedPlayable[unprocessedPlayable.length - 1] : null;
 
-                                let isTarget = false;
-                                let isNextBuffer = false;
-                                let badgeLabel = "";
+                              return (playlistVideosData.videos || [])
+                                .filter((v) =>
+                                  !videoSearchQuery ||
+                                  v.title.toLowerCase().includes(videoSearchQuery.toLowerCase()) ||
+                                  v.id.toLowerCase().includes(videoSearchQuery.toLowerCase())
+                                )
+                                .map((vid) => {
+                                  const vIdx = playlistVideosData.videos.findIndex((v) => v.id === vid.id);
+                                  const strat = autopilotSettings?.video_selection_strategy || "latest_2";
+                                  const manualId = autopilotSettings?.manual_target_video_id || "";
+                                  const isManualTarget = Boolean(manualId && vid.id === manualId);
 
-                                if (isManualTarget) {
-                                  isTarget = true;
-                                  badgeLabel = "Target Hari Ini (Manual)";
-                                } else if (!manualId) {
-                                  if (strat === "latest_2") {
-                                    const v1 = playlistVideosData.videos[0];
-                                    const v2 = playlistVideosData.videos[1];
-                                    if (vIdx === 1) {
-                                      if (!v2?.is_processed) {
-                                        isTarget = true;
-                                        badgeLabel = "Target Hari Ini (Buffer #2)";
+                                  let isTarget = false;
+                                  let isNextBuffer = false;
+                                  let badgeLabel = "";
+
+                                  if (isManualTarget) {
+                                    isTarget = true;
+                                    badgeLabel = "Target Hari Ini (Manual)";
+                                  } else if (vid.is_upcoming) {
+                                    badgeLabel = "Segera Tayang (Premiere)";
+                                  } else if (!manualId) {
+                                    if (strat === "latest_2") {
+                                      if (v2 && vid.id === v2.id) {
+                                        if (!v2.is_processed) {
+                                          isTarget = true;
+                                          badgeLabel = "Target Hari Ini (Buffer #2)";
+                                        }
+                                      } else if (v1 && vid.id === v1.id) {
+                                        if (v2 && !v2.is_processed) {
+                                          isNextBuffer = true;
+                                          badgeLabel = "Target Berikutnya (Buffer #1)";
+                                        } else if ((!v2 || v2.is_processed) && !v1.is_processed) {
+                                          isTarget = true;
+                                          badgeLabel = "Target Hari Ini (Buffer #1)";
+                                        }
                                       }
-                                    } else if (vIdx === 0) {
-                                      if (v2 && !v2.is_processed) {
-                                        isNextBuffer = true;
-                                        badgeLabel = "Target Berikutnya (Buffer #1)";
-                                      } else if (v2 && v2.is_processed && !v1?.is_processed) {
-                                        isTarget = true;
-                                        badgeLabel = "Target Hari Ini (Buffer #1)";
-                                      }
-                                    }
-                                  } else if (strat === "latest" || strat === "latest_1") {
-                                    if (vIdx === 0) {
-                                      if (!vid.is_processed) {
+                                    } else if (strat === "latest" || strat === "latest_1") {
+                                      if (v1 && vid.id === v1.id && !v1.is_processed) {
                                         isTarget = true;
                                         badgeLabel = "Target Hari Ini (Video Terbaru)";
                                       }
-                                    }
-                                  } else if (strat === "all_playlist") {
-                                    const unprocessed = playlistVideosData.videos.filter((v) => !v.is_processed);
-                                    if (unprocessed.length > 0 && vid.id === unprocessed[unprocessed.length - 1].id) {
-                                      isTarget = true;
-                                      badgeLabel = "Target Hari Ini (Backlog)";
-                                    } else if (!vid.is_processed) {
-                                      isNextBuffer = true;
-                                      badgeLabel = "Dalam Antrean";
+                                    } else if (strat === "all_playlist") {
+                                      if (oldestUnprocessed && vid.id === oldestUnprocessed.id) {
+                                        isTarget = true;
+                                        badgeLabel = "Target Hari Ini (Backlog)";
+                                      } else if (!vid.is_processed) {
+                                        isNextBuffer = true;
+                                        badgeLabel = "Dalam Antrean";
+                                      }
                                     }
                                   }
-                                }
 
-                                return (
-                                  <div
-                                    key={vid.id}
-                                    className={cn(
-                                      "p-2 rounded-lg border text-xs flex items-center justify-between gap-2 transition-colors",
-                                      vid.is_processed && !isManualTarget
-                                        ? "bg-zinc-950/40 border-zinc-800/50 opacity-60"
-                                        : isTarget
-                                        ? "bg-emerald-950/30 border-emerald-500/60 text-emerald-200 shadow-sm"
-                                        : isNextBuffer
-                                        ? "bg-violet-950/20 border-violet-500/40 text-violet-200"
-                                        : "bg-zinc-900/50 border-zinc-800 text-zinc-300"
-                                    )}
-                                  >
-                                    <div className="flex items-center gap-2 min-w-0">
-                                      <span className="text-[10px] font-mono text-zinc-500 w-5 text-center shrink-0">
-                                        #{vIdx + 1}
-                                      </span>
-
-                                      <div className="relative w-14 h-9 rounded overflow-hidden shrink-0 bg-zinc-800 border border-zinc-700/60">
-                                        <img
-                                          src={vid.thumbnail}
-                                          alt=""
-                                          className="w-full h-full object-cover"
-                                          loading="lazy"
-                                        />
-                                        <span className="absolute bottom-0.5 right-0.5 bg-black/80 text-[8px] font-mono px-1 rounded text-zinc-300">
-                                          {vid.duration_formatted}
+                                  return (
+                                    <div
+                                      key={vid.id}
+                                      className={cn(
+                                        "p-2 rounded-lg border text-xs flex items-center justify-between gap-2 transition-colors",
+                                        vid.is_upcoming
+                                          ? "bg-amber-950/20 border-amber-500/30 text-amber-200"
+                                          : vid.is_processed && !isManualTarget
+                                          ? "bg-zinc-950/40 border-zinc-800/50 opacity-60"
+                                          : isTarget
+                                          ? "bg-emerald-950/30 border-emerald-500/60 text-emerald-200 shadow-sm"
+                                          : isNextBuffer
+                                          ? "bg-violet-950/20 border-violet-500/40 text-violet-200"
+                                          : "bg-zinc-900/50 border-zinc-800 text-zinc-300"
+                                      )}
+                                    >
+                                      <div className="flex items-center gap-2 min-w-0">
+                                        <span className="text-[10px] font-mono text-zinc-500 w-5 text-center shrink-0">
+                                          #{vIdx + 1}
                                         </span>
-                                      </div>
 
-                                      <div className="min-w-0">
-                                        <span className="font-semibold text-zinc-200 block text-[11px] truncate" title={vid.title}>
-                                          {vid.title}
-                                        </span>
-                                        <div className="flex items-center gap-2 mt-0.5">
-                                          <span className="text-[9px] text-zinc-500 font-mono">ID: {vid.id}</span>
-                                          <a
-                                            href={vid.url}
-                                            target="_blank"
-                                            rel="noreferrer"
-                                            className="text-[9px] text-violet-400 hover:text-violet-300 inline-flex items-center gap-0.5"
-                                          >
-                                            <span>Tonton</span>
-                                            <ExternalLink className="h-2 w-2" />
-                                          </a>
+                                        <div className="relative w-14 h-9 rounded overflow-hidden shrink-0 bg-zinc-800 border border-zinc-700/60">
+                                          <img
+                                            src={vid.thumbnail}
+                                            alt=""
+                                            className="w-full h-full object-cover"
+                                            loading="lazy"
+                                          />
+                                          <span className="absolute bottom-0.5 right-0.5 bg-black/80 text-[8px] font-mono px-1 rounded text-zinc-300">
+                                            {vid.duration_formatted}
+                                          </span>
+                                        </div>
+
+                                        <div className="min-w-0">
+                                          <span className="font-semibold text-zinc-200 block text-[11px] truncate" title={vid.title}>
+                                            {vid.title}
+                                          </span>
+                                          <div className="flex items-center gap-2 mt-0.5">
+                                            <span className="text-[9px] text-zinc-500 font-mono">ID: {vid.id}</span>
+                                            <a
+                                              href={vid.url}
+                                              target="_blank"
+                                              rel="noreferrer"
+                                              className="text-[9px] text-violet-400 hover:text-violet-300 inline-flex items-center gap-0.5"
+                                            >
+                                              <span>Tonton</span>
+                                              <ExternalLink className="h-2 w-2" />
+                                            </a>
+                                          </div>
                                         </div>
                                       </div>
-                                    </div>
 
-                                    <div className="shrink-0 flex items-center gap-1.5 text-right">
-                                      {vid.is_processed && !isManualTarget ? (
-                                        <span className="inline-flex items-center gap-1 text-[9px] text-zinc-400 bg-zinc-800/80 px-2 py-0.5 rounded border border-zinc-700">
-                                          <CheckCircle2 className="h-2.5 w-2.5 text-zinc-400" />
-                                          <span>Sudah Diproses</span>
-                                        </span>
-                                      ) : isTarget ? (
-                                        <span className="inline-flex items-center gap-1 text-[9px] font-semibold text-emerald-300 bg-emerald-500/20 px-2 py-0.5 rounded border border-emerald-500/40 animate-pulse">
-                                          <Zap className="h-2.5 w-2.5 text-emerald-400" />
-                                          <span>{badgeLabel}</span>
-                                        </span>
-                                      ) : isNextBuffer ? (
-                                        <span className="inline-flex items-center gap-1 text-[9px] font-medium text-violet-300 bg-violet-500/20 px-2 py-0.5 rounded border border-violet-500/30">
-                                          <Clock className="h-2.5 w-2.5 text-violet-400" />
-                                          <span>{badgeLabel}</span>
-                                        </span>
-                                      ) : (
-                                        <span className="inline-flex items-center gap-1 text-[9px] text-zinc-500 bg-zinc-800/40 px-1.5 py-0.5 rounded border border-zinc-800">
-                                          <span>Antrean</span>
-                                        </span>
-                                      )}
+                                      <div className="shrink-0 flex items-center gap-1.5 text-right">
+                                        {vid.is_upcoming ? (
+                                          <span className="inline-flex items-center gap-1 text-[9px] text-amber-400 bg-amber-500/10 px-2 py-0.5 rounded border border-amber-500/30">
+                                            <Clock className="h-2.5 w-2.5 text-amber-400" />
+                                            <span>Premiere</span>
+                                          </span>
+                                        ) : vid.is_processed && !isManualTarget ? (
+                                          <div className="flex items-center gap-1">
+                                            <span className="inline-flex items-center gap-1 text-[9px] text-zinc-400 bg-zinc-800/80 px-2 py-0.5 rounded border border-zinc-700">
+                                              <CheckCircle2 className="h-2.5 w-2.5 text-zinc-400" />
+                                              <span>Sudah Diproses</span>
+                                            </span>
+                                            <button
+                                              type="button"
+                                              onClick={() => handleResetVideoProcessed(vid.id)}
+                                              className="text-[9px] text-zinc-400 hover:text-amber-400 px-1 py-0.5 rounded border border-zinc-800 hover:border-amber-500/40 bg-zinc-900/60 transition-colors"
+                                              title="Reset status diproses agar bisa dipilih autopilot kembali"
+                                            >
+                                              Reset
+                                            </button>
+                                          </div>
+                                        ) : isTarget ? (
+                                          <span className="inline-flex items-center gap-1 text-[9px] font-semibold text-emerald-300 bg-emerald-500/20 px-2 py-0.5 rounded border border-emerald-500/40 animate-pulse">
+                                            <Zap className="h-2.5 w-2.5 text-emerald-400" />
+                                            <span>{badgeLabel}</span>
+                                          </span>
+                                        ) : isNextBuffer ? (
+                                          <span className="inline-flex items-center gap-1 text-[9px] font-medium text-violet-300 bg-violet-500/20 px-2 py-0.5 rounded border border-violet-500/30">
+                                            <Clock className="h-2.5 w-2.5 text-violet-400" />
+                                            <span>{badgeLabel}</span>
+                                          </span>
+                                        ) : (
+                                          <span className="inline-flex items-center gap-1 text-[9px] text-zinc-500 bg-zinc-800/40 px-1.5 py-0.5 rounded border border-zinc-800">
+                                            <span>Antrean</span>
+                                          </span>
+                                        )}
 
-                                      {/* Manual Target Trigger Button */}
-                                      {isManualTarget ? (
-                                        <Button
-                                          type="button"
-                                          size="sm"
-                                          variant="outline"
-                                          onClick={() => handleSetManualTarget(vid.id)}
-                                          className="h-6 px-1.5 text-[9px] text-red-400 hover:text-red-300 border-red-500/30 hover:bg-red-950/20"
-                                          title="Batalkan target manual ini dan kembali ke otomatis"
-                                        >
-                                          Batal
-                                        </Button>
-                                      ) : (
-                                        <Button
-                                          type="button"
-                                          size="sm"
-                                          variant="ghost"
-                                          onClick={() => handleSetManualTarget(vid.id)}
-                                          className="h-6 px-1.5 text-[9px] text-zinc-400 hover:text-zinc-200 border border-zinc-800 hover:bg-zinc-800/60"
-                                          title={vid.is_processed ? "Paksa jadikan target manual hari ini (proses ulang)" : "Pilih video ini sebagai target eksekusi hari ini"}
-                                        >
-                                          Pilih
-                                        </Button>
-                                      )}
+                                        {/* Manual Target Trigger Button */}
+                                        {!vid.is_upcoming && (
+                                          isManualTarget ? (
+                                            <Button
+                                              type="button"
+                                              size="sm"
+                                              variant="outline"
+                                              onClick={() => handleSetManualTarget(vid.id)}
+                                              className="h-6 px-1.5 text-[9px] text-red-400 hover:text-red-300 border-red-500/30 hover:bg-red-950/20"
+                                              title="Batalkan target manual ini dan kembali ke otomatis"
+                                            >
+                                              Batal
+                                            </Button>
+                                          ) : (
+                                            <Button
+                                              type="button"
+                                              size="sm"
+                                              variant="ghost"
+                                              onClick={() => handleSetManualTarget(vid.id)}
+                                              className="h-6 px-1.5 text-[9px] text-zinc-400 hover:text-zinc-200 border border-zinc-800 hover:bg-zinc-800/60"
+                                              title={vid.is_processed ? "Paksa jadikan target manual hari ini (proses ulang)" : "Pilih video ini sebagai target eksekusi hari ini"}
+                                            >
+                                              Pilih
+                                            </Button>
+                                          )
+                                        )}
+                                      </div>
                                     </div>
-                                  </div>
-                                );
-                              })}
+                                  );
+                                });
+                            })()}
                           </div>
                         )}
+
+                        {/* Load more button if playlist has more videos */}
+                        {playlistVideosData &&
+                          playlistVideosData.playlist_count &&
+                          playlistVideosData.playlist_count > playlistVideosData.videos.length && (
+                            <div className="pt-2 border-t border-zinc-800/60 flex items-center justify-between">
+                              <span className="text-[10px] text-zinc-400">
+                                Menampilkan {playlistVideosData.videos.length} dari total {playlistVideosData.playlist_count} video
+                              </span>
+                              <Button
+                                type="button"
+                                size="sm"
+                                variant="outline"
+                                onClick={() => {
+                                  const nextLimit = (playlistVideosLimit || 50) + 50;
+                                  setPlaylistVideosLimit(nextLimit);
+                                  loadPlaylistVideosPreview(
+                                    autopilotSettings?.source_type === "playlist" ? autopilotSettings?.selected_playlist_id : undefined,
+                                    autopilotSettings?.channel_url,
+                                    nextLimit
+                                  );
+                                }}
+                                loading={isLoadingPlaylistVideos}
+                                className="h-7 text-xs text-violet-300 border-violet-500/40 hover:bg-violet-950/20"
+                                icon={<ListVideo className="h-3 w-3" />}
+                              >
+                                Muat Lebih Banyak (+50 Video)
+                              </Button>
+                            </div>
+                          )}
                       </Card>
                     )}
                   </div>

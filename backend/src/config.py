@@ -47,6 +47,9 @@ class Settings(BaseSettings):
     # Fail over to local Whisper immediately by default; do not add retry waits
     # to subtitle generation when the local 9router service is unavailable.
     NINE_ROUTER_WHISPER_MAX_RETRIES: int = 1
+    IMAGE_GEN_MODEL: str = "ag/gemini-3.1-flash-image"
+    IMAGE_GEN_BASE_URL: str = ""
+    IMAGE_GEN_API_KEY: str = ""
 
     # Gemini — supports multiple keys: "key1,key2,key3"
     GEMINI_API_KEY: str = ""

@@ -129,11 +129,15 @@ async def inspect_channel(
     }
 
 
+class ResetVideoProcessedRequest(BaseModel):
+    video_id: str
+
+
 @router.get("/playlist-videos")
 async def get_playlist_videos(
     playlist_id: Optional[str] = None,
     channel_url: Optional[str] = None,
-    limit: int = 25,
+    limit: int = 50,
     user: CurrentUser = Depends(get_current_user),
 ):
     """Fetch video preview list from a specific playlist or channel uploads."""
@@ -149,4 +153,21 @@ async def get_playlist_videos(
     return {
         "success": True,
         "data": result,
+    }
+
+
+@router.post("/reset-video-processed")
+async def reset_video_processed(
+    body: ResetVideoProcessedRequest,
+    user: CurrentUser = Depends(get_current_user),
+):
+    """Reset processed status for a video so user can re-clip/re-target it."""
+    vid_id = (body.video_id or "").strip()
+    if not vid_id:
+        raise HTTPException(status_code=400, detail="Video ID tidak boleh kosong")
+
+    ok = autopilot_service.reset_video_processed(user_id=user.id, video_id=vid_id)
+    return {
+        "success": ok,
+        "message": f"Status video {vid_id} berhasil di-reset sehingga dapat diproses kembali." if ok else "Gagal mereset status video."
     }

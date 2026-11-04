@@ -34,6 +34,7 @@ from src.presentation.routes.telegram import router as telegram_router
 from src.presentation.routes.autopilot import router as autopilot_router
 from src.presentation.routes.hermes_videogen import router as hermes_videogen_router
 from src.presentation.routes.hook_preview import router as hook_preview_router
+from src.presentation.routes.image_gen import router as image_studio_router
 
 
 logging.basicConfig(
@@ -177,9 +178,11 @@ async def lifespan(app: FastAPI):
             _ensure_reframe_tuning_table,
         )
         from src.infrastructure.hyperframes_config import ensure_hyperframes_table
+        from src.infrastructure.image_typography_store import ensure_all_typography_tables
         _ensure_reframe_tuning_table()
         _ensure_object_overlay_table()
         ensure_hyperframes_table()
+        ensure_all_typography_tables()
         from database.migrations.v6_video_generator import migrate as migrate_v6
         migrate_v6()
     except Exception as e:
@@ -209,15 +212,17 @@ async def lifespan(app: FastAPI):
     # ─── Start background tasks ───────────────────────────────────────────
     from src.infrastructure.autopilot_service import autopilot_service
     from src.infrastructure.hermes_videogen_service import hermes_videogen_service
+    from src.infrastructure.ai_image_studio_service import ai_image_studio_service
     alerting_task = asyncio.create_task(
         _alerting_service.monitor_loop(get_queue_depth=lambda: _job_queue.pending_count)
     )
     auto_scale_task = asyncio.create_task(_auto_scale_loop())
     autopilot_task = asyncio.create_task(autopilot_service.start_scheduler_loop())
     hermes_videogen_task = asyncio.create_task(hermes_videogen_service.start_scheduler_loop())
+    image_studio_task = asyncio.create_task(ai_image_studio_service.start_scheduler_loop())
 
     logger.info("Server started — local pipeline mode")
-    logger.info("Background tasks started: AlertingService, AutoScaleAdvisor, AutopilotDaemon, HermesVideoGenDaemon")
+    logger.info("Background tasks started: AlertingService, AutoScaleAdvisor, AutopilotDaemon, HermesVideoGenDaemon, AIImageStudioDaemon")
 
     yield
 
@@ -226,7 +231,8 @@ async def lifespan(app: FastAPI):
     auto_scale_task.cancel()
     autopilot_task.cancel()
     hermes_videogen_task.cancel()
-    for task in (alerting_task, auto_scale_task, autopilot_task, hermes_videogen_task):
+    image_studio_task.cancel()
+    for task in (alerting_task, auto_scale_task, autopilot_task, hermes_videogen_task, image_studio_task):
         try:
             await task
         except asyncio.CancelledError:
@@ -302,6 +308,7 @@ app.include_router(telegram_router, prefix="/api")
 app.include_router(autopilot_router, prefix="/api")
 app.include_router(hermes_videogen_router, prefix="/api")
 app.include_router(hook_preview_router, prefix="/api")
+app.include_router(image_studio_router, prefix="/api")
 from src.presentation.routes.llm_providers import router as llm_providers_router
 app.include_router(llm_providers_router, prefix="/api")
 

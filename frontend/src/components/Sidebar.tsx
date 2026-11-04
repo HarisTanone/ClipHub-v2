@@ -13,6 +13,7 @@ const mainNavItems = [
   { to: "/", icon: LayoutDashboard, label: "Dashboard" },
   { to: "/jobs/new", icon: PlusCircle, label: "New Job" },
   { to: "/video-generator", icon: Film, label: "Video Generator" },
+  { to: "/generated-images", icon: Sparkles, label: "Generated Images" },
   { to: "/social", icon: Share2, label: "Social Accounts" },
 ];
 
@@ -309,6 +310,27 @@ export function Sidebar({ open, onClose, collapsed, onToggleCollapse }: SidebarP
                         </div>
                         <span className="text-[9px] px-1 py-0.2 rounded bg-cyan-500/10 text-cyan-400 border border-cyan-500/20 shrink-0">
                           3-5 Video
+                        </span>
+                      </NavLink>
+
+                      <NavLink
+                        to="/generated-images"
+                        onClick={onClose}
+                        className={({ isActive }) =>
+                          cn(
+                            "flex items-center justify-between gap-1.5 rounded-lg px-2 py-1 text-[11px] font-medium transition-colors",
+                            isActive
+                              ? "bg-cyan-500/15 text-cyan-300 font-semibold"
+                              : "text-zinc-400 hover:bg-zinc-800/60 hover:text-zinc-200"
+                          )
+                        }
+                      >
+                        <div className="flex items-center gap-1.5 min-w-0">
+                          <Sparkles className="h-3 w-3 shrink-0 text-purple-400" />
+                          <span className="truncate">Visual Post Studio</span>
+                        </div>
+                        <span className="text-[9px] px-1 py-0.2 rounded bg-purple-500/10 text-purple-400 border border-purple-500/20 shrink-0">
+                          AI Image
                         </span>
                       </NavLink>
                     </div>
