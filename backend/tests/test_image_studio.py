@@ -147,4 +147,35 @@ def test_typography_db_store_crud():
     assert get_typography_template("pytest_custom_tpl") is None
 
 
+def test_typography_store_active_only_kwarg_compatibility():
+    """Verify get_all_typography_templates supports both include_inactive and active_only."""
+    from src.infrastructure.image_typography_store import (
+        get_all_typography_templates,
+        get_all_typography_fonts,
+        get_all_aspect_ratios,
+    )
+    from src.infrastructure.ai_image_studio_service import AIImageStudioService
+
+    # Test kwarg compatibility on all store functions
+    tpls_default = get_all_typography_templates()
+    tpls_active = get_all_typography_templates(active_only=True)
+    tpls_all = get_all_typography_templates(include_inactive=True)
+    assert len(tpls_active) > 0
+    assert len(tpls_active) <= len(tpls_all)
+    assert len(tpls_default) == len(tpls_active)
+
+    fonts_active = get_all_typography_fonts(active_only=True)
+    assert len(fonts_active) > 0
+
+    aspects_active = get_all_aspect_ratios(active_only=True)
+    assert len(aspects_active) > 0
+
+    # Test resolve_template_and_font runs without any unexpected keyword argument error
+    studio = AIImageStudioService()
+    tpl_id, font = studio._resolve_template_and_font("auto", "auto", "Kecerdasan Buatan")
+    assert tpl_id is not None
+    assert font is not None
+
+
+
 

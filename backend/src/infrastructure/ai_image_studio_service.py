@@ -530,7 +530,7 @@ class AIImageStudioService:
 
     def _resolve_template_and_font(self, requested_template: str, requested_font: str, topic: str) -> tuple[str, str]:
         """Pick template and font dynamically from DB without hardcoded mood maps."""
-        db_templates = get_all_typography_templates(active_only=True)
+        db_templates = get_all_typography_templates(include_inactive=False)
         template_ids = [t["id"] for t in db_templates] or ["minimal_quote"]
 
         if requested_template and requested_template != "auto" and requested_template in template_ids:

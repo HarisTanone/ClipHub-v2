@@ -372,9 +372,14 @@ def ensure_typography_templates_table() -> None:
 
 # ─── Templates CRUD ──────────────────────────────────────────────────────────
 
-def get_all_typography_templates(include_inactive: bool = False) -> list[dict[str, Any]]:
+def get_all_typography_templates(
+    include_inactive: bool = False,
+    active_only: Optional[bool] = None,
+) -> list[dict[str, Any]]:
     """Fetch all typography templates from database."""
     ensure_all_typography_tables()
+    if active_only is not None:
+        include_inactive = not active_only
     conn = get_dict_connection()
     try:
         if include_inactive:
@@ -512,9 +517,14 @@ def reset_typography_templates() -> list[dict[str, Any]]:
 
 # ─── Fonts CRUD ──────────────────────────────────────────────────────────────
 
-def get_all_typography_fonts(include_inactive: bool = False) -> list[dict[str, Any]]:
+def get_all_typography_fonts(
+    include_inactive: bool = False,
+    active_only: Optional[bool] = None,
+) -> list[dict[str, Any]]:
     """Fetch all fonts from database."""
     ensure_all_typography_tables()
+    if active_only is not None:
+        include_inactive = not active_only
     conn = get_dict_connection()
     try:
         if include_inactive:
@@ -633,9 +643,14 @@ def reset_typography_fonts() -> list[dict[str, Any]]:
 
 # ─── Aspect Ratios & Resolutions CRUD ────────────────────────────────────────
 
-def get_all_aspect_ratios(include_inactive: bool = False) -> list[dict[str, Any]]:
+def get_all_aspect_ratios(
+    include_inactive: bool = False,
+    active_only: Optional[bool] = None,
+) -> list[dict[str, Any]]:
     """Fetch all canvas aspect ratios and dimensions from database."""
     ensure_all_typography_tables()
+    if active_only is not None:
+        include_inactive = not active_only
     conn = get_dict_connection()
     try:
         if include_inactive:
