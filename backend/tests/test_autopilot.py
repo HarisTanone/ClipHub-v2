@@ -566,6 +566,76 @@ def test_channel_playlist_candidate_selection_latest_1():
         assert c2 is None
 
 
+def test_processed_urls_ignores_failed_jobs():
+    """Verify failed or timeout jobs do not falsely mark videos as processed."""
+    service = AutopilotService()
+    conn = get_dict_connection()
+    try:
+        # Insert a completed job and a failed job
+        conn.execute("""
+            INSERT OR REPLACE INTO jobs (
+                job_id, youtube_url, status, clips_total, clips_success, clips_failed,
+                style_preset, target_aspect_ratio, hook_engine, hook_style, broll_enabled, autogrid_enabled, created_at, updated_at
+            ) VALUES (
+                'job_pass_01', 'https://www.youtube.com/watch?v=goodvid1234', 'completed', 0, 0, 0,
+                'default', '9:16', 'v3', '', 1, 0, datetime('now'), datetime('now')
+            )
+        """)
+        conn.execute("""
+            INSERT OR REPLACE INTO jobs (
+                job_id, youtube_url, status, clips_total, clips_success, clips_failed,
+                style_preset, target_aspect_ratio, hook_engine, hook_style, broll_enabled, autogrid_enabled, created_at, updated_at
+            ) VALUES (
+                'job_fail_01', 'https://www.youtube.com/watch?v=badvid12345', 'failed', 0, 0, 0,
+                'default', '9:16', 'v3', '', 1, 0, datetime('now'), datetime('now')
+            )
+        """)
+        conn.execute("""
+            INSERT OR REPLACE INTO jobs (
+                job_id, youtube_url, status, clips_total, clips_success, clips_failed,
+                style_preset, target_aspect_ratio, hook_engine, hook_style, broll_enabled, autogrid_enabled, created_at, updated_at
+            ) VALUES (
+                'job_time_01', 'https://www.youtube.com/watch?v=timevid1234', 'timeout', 0, 0, 0,
+                'default', '9:16', 'v3', '', 1, 0, datetime('now'), datetime('now')
+            )
+        """)
+        conn.commit()
+
+        processed = service.get_processed_urls()
+        assert "goodvid1234" in processed
+        assert "badvid12345" not in processed
+        assert "timevid1234" not in processed
+    finally:
+        conn.execute("DELETE FROM jobs WHERE job_id IN ('job_pass_01', 'job_fail_01', 'job_time_01')")
+        conn.commit()
+        conn.close()
+
+
+def test_channel_playlist_manual_target_override():
+    """Verify user can explicitly set a manual target video."""
+    service = AutopilotService()
+    user_id = 99
+    service.update_settings(user_id=user_id, data={
+        "source_mode": "channel_playlist",
+        "source_type": "playlist",
+        "selected_playlist_id": "PL_sample_01",
+        "video_selection_strategy": "latest_2",
+        "manual_target_video_id": "vid5",
+    })
+
+    mock_videos = [
+        {"id": f"vid{i}", "title": f"Video Title {i}", "url": f"https://www.youtube.com/watch?v=vid{i}", "duration_sec": 1200}
+        for i in range(1, 11)
+    ]
+
+    with patch.object(service, "get_playlist_or_channel_videos", return_value={"videos": mock_videos, "title": "Mock Show"}), \
+         patch.object(service, "get_processed_urls", return_value=set()):
+        cand = service.pick_best_candidate(user_id=user_id)
+        assert cand is not None
+        assert cand["id"] == "vid5"
+
+
+
 
 
 

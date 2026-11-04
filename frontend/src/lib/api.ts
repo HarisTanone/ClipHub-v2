@@ -1123,6 +1123,23 @@ export const socialApi = {
       method: "DELETE",
     });
   },
+  async resolveEngagementUrl(url: string): Promise<{
+    id: string;
+    contentId: string;
+    platform: string;
+    url: string;
+    title: string;
+    description: string;
+    uploader: string;
+    thumbnail: string;
+    duration: number;
+    durationFormatted: string;
+  }> {
+    return request("/api/social/engagement/resolve-url", {
+      method: "POST",
+      body: JSON.stringify({ url }),
+    });
+  },
   async getTargetAccountContents(accountId: string, limit = 20): Promise<any[]> {
     return request(`/api/social/engagement/contents?accountId=${encodeURIComponent(accountId)}&limit=${limit}`);
   },
@@ -1164,10 +1181,12 @@ export const socialApi = {
     ruleId?: number;
     targetAccountId?: string;
     targetMode?: string;
+    targetUrl?: string;
     contentId?: string;
     contentIds?: string[];
     metadata?: any;
     delayMinutes?: number;
+    autoLikeComments?: boolean;
     commenters?: any[];
   }): Promise<any> {
     return request("/api/social/engagement/trigger", {
@@ -1437,6 +1456,7 @@ export interface AutopilotPlaylistVideosResult {
   target_url: string;
   videos: AutopilotVideoItem[];
   total: number;
+  playlist_count?: number;
 }
 
 export interface AutopilotSettings {
@@ -1450,6 +1470,7 @@ export interface AutopilotSettings {
   selected_playlist_id?: string;
   selected_playlist_title?: string;
   video_selection_strategy?: "latest_2" | "latest_1" | "latest" | "all_playlist";
+  manual_target_video_id?: string;
   niche_query: string;
   preset_slug: string;
   target_platforms: string;

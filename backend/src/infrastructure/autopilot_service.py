@@ -77,6 +77,7 @@ class AutopilotService:
                 ("selected_playlist_id", "TEXT DEFAULT ''"),
                 ("selected_playlist_title", "TEXT DEFAULT ''"),
                 ("video_selection_strategy", "TEXT NOT NULL DEFAULT 'latest_2'"),
+                ("manual_target_video_id", "TEXT DEFAULT ''"),
             ]:
                 try:
                     conn.execute(f"ALTER TABLE autopilot_settings ADD COLUMN {col_name} {col_def}")
@@ -161,6 +162,7 @@ class AutopilotService:
                     "selected_playlist_id": "",
                     "selected_playlist_title": "",
                     "video_selection_strategy": "latest_2",
+                    "manual_target_video_id": "",
                     "niche_query": "podcast bisnis",
                     "preset_slug": "default",
                     "target_platforms": "tiktok,instagram,youtube",
@@ -196,6 +198,7 @@ class AutopilotService:
                 "selected_playlist_id": str(r.get("selected_playlist_id") or ""),
                 "selected_playlist_title": str(r.get("selected_playlist_title") or ""),
                 "video_selection_strategy": str(r.get("video_selection_strategy") or "latest_2"),
+                "manual_target_video_id": str(r.get("manual_target_video_id") or ""),
                 "niche_query": r.get("niche_query", "podcast bisnis"),
                 "preset_slug": r.get("preset_slug", "default"),
                 "target_platforms": r.get("target_platforms", "tiktok,instagram,youtube"),
@@ -237,6 +240,7 @@ class AutopilotService:
                 selected_playlist_id = str(data.get("selected_playlist_id", curr.get("selected_playlist_id", ""))).strip()
                 selected_playlist_title = str(data.get("selected_playlist_title", curr.get("selected_playlist_title", ""))).strip()
                 video_selection_strategy = str(data.get("video_selection_strategy", curr.get("video_selection_strategy", "latest_2"))).strip() or "latest_2"
+                manual_target_video_id = str(data.get("manual_target_video_id", curr.get("manual_target_video_id", ""))).strip()
 
                 niche = str(data.get("niche_query", curr.get("niche_query", "podcast bisnis"))).strip() or "podcast bisnis"
                 preset = str(data.get("preset_slug", curr.get("preset_slug", "default"))).strip() or "default"
@@ -262,6 +266,7 @@ class AutopilotService:
                         max_daily_videos = ?, post_clips_count = ?,
                         source_mode = ?, channel_url = ?, channel_title = ?, source_type = ?,
                         selected_playlist_id = ?, selected_playlist_title = ?, video_selection_strategy = ?,
+                        manual_target_video_id = ?,
                         updated_at = ?
                     WHERE user_id = ?
                 """, (
@@ -269,6 +274,7 @@ class AutopilotService:
                     custom_time, run_time, min_dur, max_dur, max_daily, post_clips,
                     source_mode, channel_url, channel_title, source_type,
                     selected_playlist_id, selected_playlist_title, video_selection_strategy,
+                    manual_target_video_id,
                     now_str, user_id
                 ))
             else:
@@ -280,6 +286,7 @@ class AutopilotService:
                 selected_playlist_id = str(data.get("selected_playlist_id", "")).strip()
                 selected_playlist_title = str(data.get("selected_playlist_title", "")).strip()
                 video_selection_strategy = str(data.get("video_selection_strategy", "latest_2")).strip() or "latest_2"
+                manual_target_video_id = str(data.get("manual_target_video_id", "")).strip()
 
                 niche = str(data.get("niche_query", "podcast bisnis")).strip() or "podcast bisnis"
                 preset = str(data.get("preset_slug", "default")).strip() or "default"
@@ -301,13 +308,15 @@ class AutopilotService:
                         run_time, min_duration_sec, max_duration_sec, max_daily_videos, post_clips_count,
                         source_mode, channel_url, channel_title, source_type,
                         selected_playlist_id, selected_playlist_title, video_selection_strategy,
+                        manual_target_video_id,
                         updated_at
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """, (
                     user_id, enabled, niche, preset, platforms, acc_ids_str, sched_mode,
                     custom_time, run_time, min_dur, max_dur, max_daily, post_clips,
                     source_mode, channel_url, channel_title, source_type,
                     selected_playlist_id, selected_playlist_title, video_selection_strategy,
+                    manual_target_video_id,
                     now_str
                 ))
 
@@ -387,6 +396,8 @@ class AutopilotService:
                     "--dump-json",
                     "--no-playlist",
                     "--flat-playlist",
+                    "--extractor-args", "youtube:lang=id",
+                    "--add-header", "Accept-Language: id,id-ID;q=0.9,en;q=0.8",
                     "--no-warnings",
                     search_query,
                 ],
@@ -497,6 +508,8 @@ class AutopilotService:
                         "--dump-json",
                         "--flat-playlist",
                         "--playlist-end", "1",
+                        "--extractor-args", "youtube:lang=id",
+                        "--add-header", "Accept-Language: id,id-ID;q=0.9,en;q=0.8",
                         "--no-warnings",
                         "--no-update",
                         pl_url,
@@ -553,7 +566,9 @@ class AutopilotService:
                         "yt-dlp",
                         "--dump-json",
                         "--flat-playlist",
-                        "--playlist-end", "20",
+                        "--playlist-end", "40",
+                        "--extractor-args", "youtube:lang=id",
+                        "--add-header", "Accept-Language: id,id-ID;q=0.9,en;q=0.8",
                         "--no-warnings",
                         "--no-update",
                         tab_url,
@@ -627,7 +642,8 @@ class AutopilotService:
         self,
         playlist_id: Optional[str] = None,
         channel_url: Optional[str] = None,
-        limit: int = 25,
+        limit: int = 50,
+        user_id: Optional[int] = None,
     ) -> dict:
         """Fetch videos for preview from a playlist or channel uploads."""
         if playlist_id:
@@ -636,11 +652,14 @@ class AutopilotService:
             c_url = channel_url.rstrip("/")
             target_url = c_url if c_url.endswith("/videos") else f"{c_url}/videos"
         else:
-            return {"title": "", "target_url": "", "videos": [], "total": 0}
+            return {"title": "", "target_url": "", "videos": [], "total": 0, "playlist_count": 0}
 
-        processed_urls = self.get_processed_urls()
+        processed_urls = self.get_processed_urls(user_id=user_id)
         videos = []
         coll_title = ""
+        playlist_count = None
+
+        fetch_limit = max(1, min(200, limit))
 
         try:
             res = subprocess.run(
@@ -648,14 +667,16 @@ class AutopilotService:
                     "yt-dlp",
                     "--dump-json",
                     "--flat-playlist",
-                    "--playlist-end", str(max(1, min(60, limit))),
+                    "--playlist-end", str(fetch_limit),
+                    "--extractor-args", "youtube:lang=id",
+                    "--add-header", "Accept-Language: id,id-ID;q=0.9,en;q=0.8",
                     "--no-warnings",
                     "--no-update",
                     target_url,
                 ],
                 capture_output=True,
                 text=True,
-                timeout=20,
+                timeout=25,
             )
             if res.returncode == 0:
                 for line in res.stdout.strip().split("\n"):
@@ -668,6 +689,11 @@ class AutopilotService:
                             continue
                         if not coll_title:
                             coll_title = item.get("playlist_title") or item.get("playlist") or ""
+                        if playlist_count is None and item.get("playlist_count"):
+                            try:
+                                playlist_count = int(item.get("playlist_count"))
+                            except (ValueError, TypeError):
+                                pass
 
                         title = item.get("title", "")
                         url = item.get("url") or f"https://www.youtube.com/watch?v={vid_id}"
@@ -704,6 +730,7 @@ class AutopilotService:
             "target_url": target_url,
             "videos": videos,
             "total": len(videos),
+            "playlist_count": playlist_count or len(videos),
         }
 
     def _format_candidate_from_video(self, v: dict) -> dict:
@@ -722,6 +749,7 @@ class AutopilotService:
         self,
         settings: dict,
         processed_urls: set[str],
+        user_id: Optional[int] = None,
     ) -> Optional[dict]:
         """Pick video candidate from user-selected channel or playlist according to strategy.
         
@@ -737,12 +765,14 @@ class AutopilotService:
         strategy = settings.get("video_selection_strategy", "latest_2")
         min_dur = settings.get("min_duration_sec", 480)
         max_dur = settings.get("max_duration_sec", 3600)
+        manual_target_id = str(settings.get("manual_target_video_id") or "").strip()
 
         # 1. Fetch playlist or channel videos
         data = self.get_playlist_or_channel_videos(
             playlist_id=playlist_id if source_type == "playlist" else None,
             channel_url=channel_url if source_type != "playlist" or not playlist_id else None,
             limit=50,
+            user_id=user_id,
         )
         videos = data.get("videos") or []
         if not videos:
@@ -751,6 +781,12 @@ class AutopilotService:
                 f"playlist_id={playlist_id}, channel_url={channel_url})"
             )
             return None
+
+        # Prioritize manual target selection if configured by user
+        if manual_target_id:
+            for v in videos:
+                if v.get("id") == manual_target_id:
+                    return self._format_candidate_from_video(v)
 
         # 2. Filter videos by duration if duration > 0 (fallback to all if none match duration)
         def duration_ok(v):
@@ -761,12 +797,12 @@ class AutopilotService:
         eligible_pool = filtered_videos if filtered_videos else videos
 
         # 3. Strategy evaluation
-        # Strategy 1: 'latest' or 'latest_1' (Selalu ambil video terbaru / vid 1)
+        # Strategy 1: 'latest' or 'latest_1' (Selalu ambil video terbaru / vid 1 di index 0)
         if strategy in ("latest", "latest_1"):
-            window = eligible_pool[:1]
-            for v in window:
-                if v["id"] not in processed_urls and v["url"] not in processed_urls:
-                    return self._format_candidate_from_video(v)
+            if len(eligible_pool) >= 1:
+                v1 = eligible_pool[0]
+                if v1["id"] not in processed_urls and v1["url"] not in processed_urls:
+                    return self._format_candidate_from_video(v1)
             return None
 
         # Strategy 2: 'latest_2' or 'second_latest_buffer' (Buffer 2 video terakhir: vid 2 dulu, lalu vid 1)
@@ -794,15 +830,24 @@ class AutopilotService:
                 return self._format_candidate_from_video(unprocessed[-1])
             return None
 
-    def get_processed_urls(self) -> set[str]:
-        """Get set of all YouTube URLs previously processed in jobs or autopilot_runs."""
+    def get_processed_urls(self, user_id: Optional[int] = None) -> set[str]:
+        """Get set of all YouTube URLs previously processed in completed jobs or autopilot_runs."""
         urls = set()
         conn = get_dict_connection()
         try:
             cur = conn.cursor()
-            # 1. From jobs table
+            # 1. From jobs table - only completed or actively processing jobs (never failed/timeout)
             try:
-                cur.execute("SELECT DISTINCT youtube_url FROM jobs WHERE youtube_url IS NOT NULL")
+                query = (
+                    "SELECT DISTINCT youtube_url FROM jobs "
+                    "WHERE youtube_url IS NOT NULL "
+                    "AND status IN ('completed', 'processing', 'rendering', 'queued')"
+                )
+                params: list[Any] = []
+                if user_id is not None:
+                    query += " AND (user_id = ? OR user_id IS NULL)"
+                    params.append(user_id)
+                cur.execute(query, tuple(params))
                 for r in cur.fetchall():
                     u = str(r["youtube_url"]).strip()
                     if u:
@@ -814,9 +859,14 @@ class AutopilotService:
             except Exception:
                 pass
 
-            # 2. From autopilot_runs table
+            # 2. From autopilot_runs table - only successful runs
             try:
-                cur.execute("SELECT DISTINCT youtube_url FROM autopilot_runs")
+                query2 = "SELECT DISTINCT youtube_url FROM autopilot_runs WHERE status != 'failed'"
+                params2: list[Any] = []
+                if user_id is not None:
+                    query2 += " AND (user_id = ? OR user_id IS NULL)"
+                    params2.append(user_id)
+                cur.execute(query2, tuple(params2))
                 for r in cur.fetchall():
                     u = str(r["youtube_url"]).strip()
                     if u:
@@ -835,11 +885,11 @@ class AutopilotService:
         """Search and pick the #1 best viral candidate matching settings that hasn't been clipped."""
         settings = self.get_settings(user_id)
         source_mode = settings.get("source_mode", "ai")
-        processed_urls = self.get_processed_urls()
+        processed_urls = self.get_processed_urls(user_id=user_id)
 
         # If user configured channel / playlist source mode
         if source_mode == "channel_playlist":
-            return self.pick_candidate_from_channel_or_playlist(settings, processed_urls)
+            return self.pick_candidate_from_channel_or_playlist(settings, processed_urls, user_id=user_id)
 
         # AI Discovery mode
         niche = settings.get("niche_query", "podcast bisnis")

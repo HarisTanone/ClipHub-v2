@@ -17,6 +17,12 @@ import {
   Layers,
   ChevronRight,
   ShieldCheck,
+  Link,
+  Search,
+  AlertCircle,
+  ExternalLink,
+  Play,
+  X,
 } from "lucide-react";
 import { socialApi } from "@/lib/api";
 import { Toggle } from "@/components/ui/Toggle";
@@ -97,6 +103,7 @@ export function EngagementStudio() {
   const [accounts, setAccounts] = useState<SocialAccountOption[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [triggering, setTriggering] = useState(false);
 
   // Platform Filter tab for selecting target account
   const [selectedPlatform, setSelectedPlatform] = useState<string>("all");
@@ -104,9 +111,14 @@ export function EngagementStudio() {
   // Form State
   const [formName, setFormName] = useState("Campaign Auto Engagement Skena");
   const [formTargetAccountId, setFormTargetAccountId] = useState("");
-  const [formTargetMode, setFormTargetMode] = useState<"latest" | "specific">("latest");
+  const [formTargetMode, setFormTargetMode] = useState<"latest" | "specific" | "url">("latest");
+  const [formTargetUrl, setFormTargetUrl] = useState("");
+  const [resolvingUrl, setResolvingUrl] = useState(false);
+  const [resolvedUrlData, setResolvedUrlData] = useState<any | null>(null);
+
   const [formSpecificContentIds, setFormSpecificContentIds] = useState<string[]>([]);
   const [manualContentIdInput, setManualContentIdInput] = useState("");
+  const [gallerySearchQuery, setGallerySearchQuery] = useState("");
   const [formDelayMinutes, setFormDelayMinutes] = useState(5);
   const [formAutoLikeComments, setFormAutoLikeComments] = useState(true);
   const [formIsActive, setFormIsActive] = useState(true);
@@ -170,8 +182,24 @@ export function EngagementStudio() {
           const targetRule = (rules || []).find((r: any) => r.id === editRuleId);
           if (targetRule) {
             setFormName(targetRule.name);
-            setFormTargetAccountId(targetRule.targetAccountId);
-            setFormTargetMode(targetRule.targetMode);
+            setFormTargetAccountId(targetRule.targetAccountId || "");
+            const mode = (targetRule.targetMode || "latest") as "latest" | "specific" | "url";
+            setFormTargetMode(mode);
+            if (targetRule.targetUrl) {
+              setFormTargetUrl(targetRule.targetUrl);
+              setResolvedUrlData({
+                id: targetRule.specificContentId || "",
+                contentId: targetRule.specificContentId || "",
+                platform: targetRule.targetPlatform || "tiktok",
+                url: targetRule.targetUrl,
+                title: targetRule.name || "Video Target",
+                description: "",
+                uploader: targetRule.targetAccountName || "",
+                thumbnail: "",
+                duration: 0,
+                durationFormatted: "",
+              });
+            }
             const contentIds = targetRule.specificContentIds && targetRule.specificContentIds.length > 0
               ? targetRule.specificContentIds
               : targetRule.specificContentId
@@ -209,7 +237,7 @@ export function EngagementStudio() {
     if (formTargetAccountId && formTargetMode === "specific") {
       setLoadingContents(true);
       socialApi
-        .getTargetAccountContents(formTargetAccountId, 24)
+        .getTargetAccountContents(formTargetAccountId, 30)
         .then((items) => setTargetContents(items || []))
         .catch(() => setTargetContents([]))
         .finally(() => setLoadingContents(false));
@@ -242,25 +270,135 @@ export function EngagementStudio() {
     setFormCommenters(autoCommenters);
   };
 
-  const handleSaveRule = async () => {
-    if (!formTargetAccountId) {
-      alert("Pilih akun target utama (Akun A)");
+  const handleResolveUrl = async (urlToResolve = formTargetUrl) => {
+    const trimmed = urlToResolve.trim();
+    if (!trimmed) {
+      alert("Masukkan URL video terlebih dahulu");
       return;
     }
+    try {
+      setResolvingUrl(true);
+      const data = await socialApi.resolveEngagementUrl(trimmed);
+      setResolvedUrlData(data);
+      setFormTargetUrl(data.url || trimmed);
+      if (data.contentId) {
+        setFormSpecificContentIds([data.contentId]);
+      }
+    } catch (err: any) {
+      alert(`Gagal memeriksa URL video: ${err.message || err}`);
+    } finally {
+      setResolvingUrl(false);
+    }
+  };
+
+  const handleAddCommenter = (accId: string) => {
+    if (!accId) return;
+    const acc = accounts.find((a) => a.id === accId);
+    if (!acc) return;
+    if (formCommenters.some((c) => c.accountId === accId)) return;
+    const nextIdx = formCommenters.length;
+    const role = ROLE_OPTIONS[nextIdx % ROLE_OPTIONS.length];
+    setFormCommenters((prev) => [
+      ...prev,
+      {
+        accountId: acc.id,
+        accountName: acc.name,
+        roleCategory: role.value as any,
+        persona: role.defaultPersona,
+      },
+    ]);
+  };
+
+  const handleRemoveCommenter = (idx: number) => {
+    setFormCommenters((prev) => prev.filter((_, i) => i !== idx));
+  };
+
+  const handleDirectTrigger = async () => {
+    if (formTargetMode === "url") {
+      if (!resolvedUrlData && !formTargetUrl.trim()) {
+        alert("Masukkan dan periksa URL video pada Langkah 2 terlebih dahulu");
+        return;
+      }
+    } else if (!formTargetAccountId) {
+      alert("Pilih akun target utama pada Langkah 1 terlebih dahulu");
+      return;
+    }
+
+    if (formCommenters.length === 0 || formCommenters.some((c) => !c.accountId)) {
+      alert("Pilih minimal satu akun pengomentar pada Langkah 3");
+      return;
+    }
+
+    const targetAcc = accounts.find((a) => a.id === formTargetAccountId);
+    const resolvedCid = resolvedUrlData?.contentId || (formSpecificContentIds.length > 0 ? formSpecificContentIds[0] : "");
+
+    try {
+      setTriggering(true);
+      const res = await socialApi.triggerEngagement({
+        targetAccountId: formTargetAccountId || formCommenters[0]?.accountId,
+        targetMode: formTargetMode,
+        targetUrl: formTargetMode === "url" ? formTargetUrl : undefined,
+        contentId: formTargetMode === "url" ? (resolvedCid || undefined) : (formSpecificContentIds[0] || undefined),
+        contentIds: formTargetMode === "specific" ? formSpecificContentIds : undefined,
+        metadata: resolvedUrlData
+          ? {
+              title: resolvedUrlData.title,
+              description: resolvedUrlData.description,
+              uploader: resolvedUrlData.uploader,
+              platform: resolvedUrlData.platform,
+            }
+          : undefined,
+        delayMinutes: Number(formDelayMinutes) || 0,
+        autoLikeComments: formAutoLikeComments,
+        commenters: formCommenters.map((c) => ({
+          accountId: c.accountId,
+          accountName: accounts.find((a) => a.id === c.accountId)?.name || c.accountName || "",
+          roleCategory: c.roleCategory || "pro",
+          persona: c.persona || "Reaksi natural",
+        })),
+      });
+      alert(res.message || "Tugas auto engagement berhasil dijadwalkan!");
+      navigate("/social-engagement");
+    } catch (err: any) {
+      alert(`Gagal menjalankan engagement: ${err.message || err}`);
+    } finally {
+      setTriggering(false);
+    }
+  };
+
+  const handleSaveRule = async () => {
+    if (formTargetMode === "url") {
+      if (!formTargetUrl.trim() && !resolvedUrlData) {
+        alert("Masukkan URL video pada Langkah 2 terlebih dahulu");
+        return;
+      }
+    } else {
+      if (!formTargetAccountId) {
+        alert("Pilih akun target utama (Akun A)");
+        return;
+      }
+      if (formTargetMode === "specific" && formSpecificContentIds.length === 0) {
+        alert("Pilih minimal satu video spesifik dari galeri atau masukkan Content ID");
+        return;
+      }
+    }
+
     if (formCommenters.length === 0 || formCommenters.some((c) => !c.accountId)) {
       alert("Pilih minimal satu akun pengomentar");
       return;
     }
 
     const targetAcc = accounts.find((a) => a.id === formTargetAccountId);
+    const resolvedCid = resolvedUrlData?.contentId || (formSpecificContentIds.length > 0 ? formSpecificContentIds[0] : "");
     const payload = {
       name: formName || "Auto Engagement Rule",
-      targetAccountId: formTargetAccountId,
-      targetAccountName: targetAcc?.name || "",
-      targetPlatform: targetAcc?.platform || "tiktok",
+      targetAccountId: formTargetAccountId || (formCommenters[0]?.accountId || ""),
+      targetAccountName: targetAcc?.name || (resolvedUrlData?.uploader || ""),
+      targetPlatform: targetAcc?.platform || resolvedUrlData?.platform || "tiktok",
       targetMode: formTargetMode,
-      specificContentIds: formSpecificContentIds,
-      specificContentId: formSpecificContentIds[0] || "",
+      targetUrl: formTargetMode === "url" ? formTargetUrl : "",
+      specificContentIds: formTargetMode === "url" && resolvedCid ? [resolvedCid] : formSpecificContentIds,
+      specificContentId: resolvedCid,
       isActive: formIsActive,
       delayMinutes: Number(formDelayMinutes) || 0,
       autoLikeComments: formAutoLikeComments,
@@ -292,11 +430,17 @@ export function EngagementStudio() {
     setPreviewLoading(true);
     setPreviewModalOpen(true);
     try {
-      const mockMeta = {
-        title: "Trik Bikin Konten FYP Tiap Hari",
-        description: "Rahasia konsisten upload video tanpa burnout untuk kreator skena Jakarta",
-        topic: "Edukasi & Lifestyle",
-      };
+      const mockMeta = resolvedUrlData
+        ? {
+            title: resolvedUrlData.title,
+            description: resolvedUrlData.description,
+            topic: resolvedUrlData.uploader || "Video Target",
+          }
+        : {
+            title: "Trik Bikin Konten FYP Tiap Hari",
+            description: "Rahasia konsisten upload video tanpa burnout untuk kreator skena Jakarta",
+            topic: "Edukasi & Lifestyle",
+          };
       const res = await socialApi.previewEngagementComments(
         mockMeta,
         formCommenters.map((c) => ({
@@ -362,7 +506,16 @@ export function EngagementStudio() {
             className="flex items-center gap-2 px-3 py-2 rounded-xl border border-zinc-800 bg-zinc-900 hover:bg-zinc-800 text-zinc-300 text-xs font-medium transition-colors"
           >
             <Sparkles className="h-4 w-4 text-cyan-400" />
-            Preview Komentar AI
+            Preview AI
+          </button>
+          <button
+            type="button"
+            onClick={handleDirectTrigger}
+            disabled={triggering}
+            className="flex items-center gap-2 px-3.5 py-2 rounded-xl border border-emerald-500/30 bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 text-xs font-semibold transition-colors disabled:opacity-50"
+          >
+            {triggering ? <RefreshCw className="h-4 w-4 animate-spin" /> : <Play className="h-4 w-4 fill-current" />}
+            Jalankan Sekarang
           </button>
           <button
             type="button"
@@ -529,21 +682,23 @@ export function EngagementStudio() {
         </div>
       </div>
 
-      {/* Target Content Selection (Latest vs Specific Multiple with Thumbnails) */}
+      {/* Target Content Selection (Latest vs Specific vs Direct URL) */}
       <div className="p-5 rounded-2xl border border-zinc-800 bg-zinc-900/40 space-y-4">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
           <div>
             <h3 className="text-sm font-semibold text-zinc-100 flex items-center gap-2">
               <Video className="h-4 w-4 text-emerald-400" />
-              2. Target Postingan Video ({targetAccountObj?.name || "Akun Target"})
+              2. Target Postingan Video {targetAccountObj ? `(${targetAccountObj.name})` : ""}
             </h3>
             <p className="text-xs text-zinc-400 mt-0.5">
-              Pilih apakah bot akan otomatis komentar di video terbaru atau memilih video spesifik dari galeri.
+              Pilih apakah bot akan otomatis komentar di video terbaru, memilih spesifik dari galeri akun, atau memasukkan link URL video langsung.
             </p>
           </div>
 
-          <div className="flex items-center gap-4 bg-zinc-950 p-1.5 rounded-xl border border-zinc-800 text-xs">
-            <label className="flex items-center gap-2 px-2.5 py-1 rounded-lg cursor-pointer text-zinc-300">
+          <div className="flex flex-wrap items-center gap-2 bg-zinc-950 p-1.5 rounded-xl border border-zinc-800 text-xs">
+            <label className={`flex items-center gap-2 px-3 py-1.5 rounded-lg cursor-pointer transition-colors ${
+              formTargetMode === "latest" ? "bg-zinc-800 text-emerald-400 font-semibold" : "text-zinc-400 hover:text-zinc-200"
+            }`}>
               <input
                 type="radio"
                 name="targetMode"
@@ -552,9 +707,12 @@ export function EngagementStudio() {
                 onChange={() => setFormTargetMode("latest")}
                 className="accent-emerald-500"
               />
-              <span className="font-semibold">Postingan Terbaru</span>
+              <span>Postingan Terbaru</span>
             </label>
-            <label className="flex items-center gap-2 px-2.5 py-1 rounded-lg cursor-pointer text-zinc-300">
+
+            <label className={`flex items-center gap-2 px-3 py-1.5 rounded-lg cursor-pointer transition-colors ${
+              formTargetMode === "specific" ? "bg-zinc-800 text-emerald-400 font-semibold" : "text-zinc-400 hover:text-zinc-200"
+            }`}>
               <input
                 type="radio"
                 name="targetMode"
@@ -563,118 +721,323 @@ export function EngagementStudio() {
                 onChange={() => setFormTargetMode("specific")}
                 className="accent-emerald-500"
               />
-              <span className="font-semibold">Pilih Spesifik ({formSpecificContentIds.length} dipilih)</span>
+              <span>Pilih Spesifik ({formSpecificContentIds.length} dipilih)</span>
+            </label>
+
+            <label className={`flex items-center gap-2 px-3 py-1.5 rounded-lg cursor-pointer transition-colors ${
+              formTargetMode === "url" ? "bg-zinc-800 text-emerald-400 font-semibold" : "text-zinc-400 hover:text-zinc-200"
+            }`}>
+              <input
+                type="radio"
+                name="targetMode"
+                value="url"
+                checked={formTargetMode === "url"}
+                onChange={() => setFormTargetMode("url")}
+                className="accent-emerald-500"
+              />
+              <span className="flex items-center gap-1.5">
+                <Link className="h-3.5 w-3.5 text-cyan-400" />
+                Input URL Video Langsung
+              </span>
             </label>
           </div>
         </div>
 
+        {/* Mode 1: Latest Post Info */}
+        {formTargetMode === "latest" && (
+          <div className="p-4 rounded-xl border border-emerald-500/20 bg-emerald-500/5 space-y-2">
+            <div className="flex items-center gap-2 text-xs font-semibold text-emerald-400">
+              <CheckCircle2 className="h-4 w-4" />
+              <span>Otomatis Menargetkan Postingan Terbaru (Strict Latest Publication)</span>
+            </div>
+            <p className="text-xs text-zinc-300 leading-relaxed">
+              Sistem secara otomatis mengambil postingan terbaru yang diterbitkan oleh Akun Target Utama dan mengurutkan secara ketat berdasarkan tanggal publikasi terkini (descending). Setiap kali dipicu, komentar hanya akan ditujukan ke postingan yang paling baru dirilis sehingga tidak akan kembali ke video lama.
+            </p>
+          </div>
+        )}
+
+        {/* Mode 2: Specific Post Selection */}
         {formTargetMode === "specific" && (
           <div className="space-y-3 pt-2 border-t border-zinc-800/60">
-            <div className="flex items-center justify-between text-xs">
-              <span className="text-zinc-400">
-                Klik kartu video di bawah untuk memilih / unselect:
-              </span>
-              {formSpecificContentIds.length > 0 && (
-                <button
-                  type="button"
-                  onClick={() => setFormSpecificContentIds([])}
-                  className="text-rose-400 hover:text-rose-300 text-xs underline"
-                >
-                  Reset Semua Pilihan
-                </button>
-              )}
-            </div>
-
-            {loadingContents ? (
-              <div className="flex items-center justify-center gap-2 py-12 text-zinc-500 text-xs">
-                <RefreshCw className="h-4 w-4 animate-spin text-cyan-400" />
-                <span>Mengambil galeri video akun target...</span>
-              </div>
-            ) : targetContents.length > 0 ? (
-              <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-3 max-h-80 overflow-y-auto pr-1">
-                {targetContents.map((c) => {
-                  const isSelected = formSpecificContentIds.includes(c.id);
-                  return (
-                    <div
-                      key={c.id}
-                      onClick={() => {
-                        setFormSpecificContentIds((prev) =>
-                          isSelected ? prev.filter((id) => id !== c.id) : [...prev, c.id]
-                        );
-                      }}
-                      className={`group relative rounded-xl border p-2 flex flex-col gap-2 cursor-pointer transition-all ${
-                        isSelected
-                          ? "border-emerald-500 bg-emerald-500/15 ring-1 ring-emerald-500 shadow-lg shadow-emerald-500/10"
-                          : "border-zinc-800 bg-zinc-950/60 hover:border-zinc-700 hover:bg-zinc-900"
-                      }`}
-                    >
-                      {/* Video Thumbnail */}
-                      <div className="aspect-[9/16] w-full bg-zinc-950 rounded-lg overflow-hidden relative flex items-center justify-center">
-                        {c.thumbnail ? (
-                          <img
-                            src={c.thumbnail}
-                            alt={c.title || "Video thumbnail"}
-                            className="w-full h-full object-cover transition-transform group-hover:scale-105"
-                          />
-                        ) : (
-                          <div className="text-zinc-600 flex flex-col items-center gap-1">
-                            <Video className="h-6 w-6" />
-                            <span className="text-[9px]">No Media</span>
-                          </div>
-                        )}
-
-                        <div
-                          className={`absolute top-2 right-2 rounded-full p-1 transition-all ${
-                            isSelected
-                              ? "bg-emerald-500 text-zinc-950"
-                              : "bg-black/60 text-transparent border border-zinc-700"
-                          }`}
-                        >
-                          <CheckCircle2 className="h-3.5 w-3.5 fill-current" />
-                        </div>
-                      </div>
-
-                      <div className="space-y-0.5">
-                        <p className="text-[11px] font-medium text-zinc-200 line-clamp-2 leading-snug">
-                          {c.title || c.description || "Video Tanpa Judul"}
-                        </p>
-                        <p className="text-[9px] text-zinc-500">
-                          {c.createdAt ? new Date(c.createdAt).toLocaleDateString() : ""}
-                        </p>
-                      </div>
-                    </div>
-                  );
-                })}
+            {!formTargetAccountId ? (
+              <div className="p-4 rounded-xl border border-amber-500/30 bg-amber-500/10 flex items-start gap-3">
+                <AlertCircle className="h-5 w-5 text-amber-400 shrink-0 mt-0.5" />
+                <div>
+                  <h4 className="text-xs font-semibold text-amber-300">Akun Target Utama Belum Dipilih</h4>
+                  <p className="text-xs text-zinc-300 mt-1">
+                    Silakan pilih salah satu Akun Target Utama pada Langkah 1 terlebih dahulu untuk memuat galeri postingan video akun tersebut.
+                  </p>
+                </div>
               </div>
             ) : (
-              <div className="text-center py-8 text-zinc-500 border border-zinc-800/80 rounded-xl text-xs">
-                Tidak ada video yang ditemukan dari akun target ini.
+              <>
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs">
+                  <div className="flex items-center gap-2">
+                    <span className="text-zinc-400">
+                      Pilih satu atau lebih video dari galeri akun <strong className="text-zinc-200">{targetAccountObj?.name}</strong>:
+                    </span>
+                    <span className="px-2 py-0.5 rounded bg-zinc-800 text-zinc-300 font-mono text-[11px]">
+                      {formSpecificContentIds.length} dipilih
+                    </span>
+                  </div>
+
+                  <div className="flex items-center gap-2">
+                    <div className="relative">
+                      <Search className="h-3.5 w-3.5 text-zinc-500 absolute left-2.5 top-1/2 -translate-y-1/2" />
+                      <input
+                        type="text"
+                        value={gallerySearchQuery}
+                        onChange={(e) => setGallerySearchQuery(e.target.value)}
+                        placeholder="Cari judul video..."
+                        className="pl-8 pr-3 py-1 rounded-lg border border-zinc-800 bg-zinc-950 text-zinc-200 text-xs focus:outline-none focus:border-emerald-500 w-44"
+                      />
+                    </div>
+                    {formSpecificContentIds.length > 0 && (
+                      <button
+                        type="button"
+                        onClick={() => setFormSpecificContentIds([])}
+                        className="text-rose-400 hover:text-rose-300 text-xs underline"
+                      >
+                        Reset Pilihan
+                      </button>
+                    )}
+                  </div>
+                </div>
+
+                {loadingContents ? (
+                  <div className="flex items-center justify-center gap-2 py-12 text-zinc-500 text-xs">
+                    <RefreshCw className="h-4 w-4 animate-spin text-cyan-400" />
+                    <span>Mengambil galeri video akun target...</span>
+                  </div>
+                ) : targetContents.length > 0 ? (
+                  <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-3 max-h-80 overflow-y-auto pr-1">
+                    {targetContents
+                      .filter((c) => {
+                        if (!gallerySearchQuery.trim()) return true;
+                        const q = gallerySearchQuery.toLowerCase();
+                        return (
+                          (c.title || "").toLowerCase().includes(q) ||
+                          (c.description || "").toLowerCase().includes(q) ||
+                          (c.id || "").toLowerCase().includes(q)
+                        );
+                      })
+                      .map((c) => {
+                        const isSelected = formSpecificContentIds.includes(c.id);
+                        return (
+                          <div
+                            key={c.id}
+                            onClick={() => {
+                              setFormSpecificContentIds((prev) =>
+                                isSelected ? prev.filter((id) => id !== c.id) : [...prev, c.id]
+                              );
+                            }}
+                            className={`group relative rounded-xl border p-2 flex flex-col gap-2 cursor-pointer transition-all ${
+                              isSelected
+                                ? "border-emerald-500 bg-emerald-500/15 ring-1 ring-emerald-500 shadow-lg shadow-emerald-500/10"
+                                : "border-zinc-800 bg-zinc-950/60 hover:border-zinc-700 hover:bg-zinc-900"
+                            }`}
+                          >
+                            {/* Video Thumbnail */}
+                            <div className="aspect-[9/16] w-full bg-zinc-950 rounded-lg overflow-hidden relative flex items-center justify-center">
+                              {c.thumbnail ? (
+                                <img
+                                  src={c.thumbnail}
+                                  alt={c.title || "Video thumbnail"}
+                                  className="w-full h-full object-cover transition-transform group-hover:scale-105"
+                                />
+                              ) : (
+                                <div className="text-zinc-600 flex flex-col items-center gap-1">
+                                  <Video className="h-6 w-6" />
+                                  <span className="text-[9px]">No Media</span>
+                                </div>
+                              )}
+
+                              <div
+                                className={`absolute top-2 right-2 rounded-full p-1 transition-all ${
+                                  isSelected
+                                    ? "bg-emerald-500 text-zinc-950"
+                                    : "bg-black/60 text-transparent border border-zinc-700"
+                                }`}
+                              >
+                                <CheckCircle2 className="h-3.5 w-3.5 fill-current" />
+                              </div>
+                            </div>
+
+                            <div className="space-y-0.5">
+                              <p className="text-[11px] font-medium text-zinc-200 line-clamp-2 leading-snug">
+                                {c.title || c.description || "Video Tanpa Judul"}
+                              </p>
+                              <p className="text-[9px] text-zinc-500">
+                                {c.createdAt ? new Date(c.createdAt).toLocaleDateString() : ""}
+                              </p>
+                            </div>
+                          </div>
+                        );
+                      })}
+                  </div>
+                ) : (
+                  <div className="text-center py-8 text-zinc-500 border border-zinc-800/80 rounded-xl text-xs">
+                    Tidak ada video yang ditemukan dari akun target ini.
+                  </div>
+                )}
+
+                {/* Manual Content ID */}
+                <div className="pt-2 flex items-center gap-2">
+                  <input
+                    type="text"
+                    value={manualContentIdInput}
+                    onChange={(e) => setManualContentIdInput(e.target.value)}
+                    placeholder="Atau tambahkan Content ID manual (misal: 113958387982006_942538351814577)"
+                    className="flex-1 px-3 py-2 rounded-xl border border-zinc-800 bg-zinc-950 text-zinc-200 focus:outline-none focus:border-emerald-500 font-mono text-xs"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const val = manualContentIdInput.trim();
+                      if (val && !formSpecificContentIds.includes(val)) {
+                        setFormSpecificContentIds((prev) => [...prev, val]);
+                        setManualContentIdInput("");
+                      }
+                    }}
+                    className="px-4 py-2 rounded-xl bg-zinc-800 hover:bg-zinc-700 text-zinc-200 text-xs font-semibold"
+                  >
+                    Tambah ID
+                  </button>
+                </div>
+              </>
+            )}
+          </div>
+        )}
+
+        {/* Mode 3: Direct Video URL Input */}
+        {formTargetMode === "url" && (
+          <div className="space-y-4 pt-3 border-t border-zinc-800/60">
+            <div className="p-4 rounded-xl border border-zinc-800 bg-zinc-950/80 space-y-3">
+              <label className="text-xs font-semibold text-zinc-300 flex items-center justify-between">
+                <span className="flex items-center gap-1.5">
+                  <Link className="h-4 w-4 text-cyan-400" />
+                  Masukkan URL Video (TikTok, YouTube, Instagram Reels, atau Repliz)
+                </span>
+                <span className="text-[11px] text-zinc-500">Mendukung link pendek & link web</span>
+              </label>
+
+              <div className="flex gap-2">
+                <div className="relative flex-1">
+                  <input
+                    type="text"
+                    value={formTargetUrl}
+                    onChange={(e) => {
+                      setFormTargetUrl(e.target.value);
+                      if (resolvedUrlData && e.target.value !== resolvedUrlData.url) {
+                        setResolvedUrlData(null);
+                      }
+                    }}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") {
+                        e.preventDefault();
+                        handleResolveUrl();
+                      }
+                    }}
+                    placeholder="Contoh: https://www.tiktok.com/@username/video/7345678901234567890 atau https://youtu.be/..."
+                    className="w-full px-3.5 py-2.5 rounded-xl border border-zinc-800 bg-zinc-900 text-zinc-200 text-xs focus:outline-none focus:border-emerald-500 font-mono"
+                  />
+                  {formTargetUrl && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setFormTargetUrl("");
+                        setResolvedUrlData(null);
+                      }}
+                      className="absolute right-3 top-1/2 -translate-y-1/2 text-zinc-500 hover:text-zinc-300"
+                    >
+                      <X className="h-3.5 w-3.5" />
+                    </button>
+                  )}
+                </div>
+
+                <button
+                  type="button"
+                  disabled={resolvingUrl || !formTargetUrl.trim()}
+                  onClick={() => handleResolveUrl()}
+                  className="px-4 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white text-xs font-semibold flex items-center gap-2 transition-all shadow-lg shadow-emerald-900/20 shrink-0"
+                >
+                  {resolvingUrl ? (
+                    <>
+                      <RefreshCw className="h-3.5 w-3.5 animate-spin" />
+                      <span>Memeriksa...</span>
+                    </>
+                  ) : (
+                    <>
+                      <Search className="h-3.5 w-3.5" />
+                      <span>Periksa & Dapatkan ID</span>
+                    </>
+                  )}
+                </button>
+              </div>
+            </div>
+
+            {/* Resolved Video Card Preview */}
+            {resolvedUrlData && (
+              <div className="p-4 rounded-xl border border-emerald-500/30 bg-emerald-500/5 space-y-3">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-semibold text-emerald-400 flex items-center gap-1.5">
+                    <CheckCircle2 className="h-4 w-4 text-emerald-400" />
+                    Video Berhasil Ditemukan & Terverifikasi
+                  </span>
+                  <span className="px-2 py-0.5 rounded text-[10px] font-mono uppercase bg-zinc-800 text-zinc-300 border border-zinc-700">
+                    {resolvedUrlData.platform}
+                  </span>
+                </div>
+
+                <div className="flex flex-col sm:flex-row gap-4">
+                  {resolvedUrlData.thumbnail && (
+                    <div className="w-28 aspect-[9/16] sm:w-24 sm:aspect-[9/16] bg-zinc-950 rounded-lg overflow-hidden border border-zinc-800 shrink-0">
+                      <img
+                        src={resolvedUrlData.thumbnail}
+                        alt={resolvedUrlData.title}
+                        className="w-full h-full object-cover"
+                      />
+                    </div>
+                  )}
+
+                  <div className="flex-1 min-w-0 space-y-2">
+                    <div>
+                      <h4 className="text-sm font-semibold text-zinc-100 line-clamp-2">
+                        {resolvedUrlData.title || "Video Tanpa Judul"}
+                      </h4>
+                      {resolvedUrlData.uploader && (
+                        <p className="text-xs text-zinc-400 mt-0.5">
+                          Oleh: <span className="text-zinc-200 font-medium">{resolvedUrlData.uploader}</span>
+                        </p>
+                      )}
+                    </div>
+
+                    <div className="flex flex-wrap items-center gap-2 pt-1 text-[11px]">
+                      <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-zinc-950 border border-zinc-800 font-mono text-zinc-300">
+                        <span className="text-zinc-500 text-[10px]">CONTENT ID:</span>
+                        <span className="text-emerald-400 font-bold">{resolvedUrlData.contentId}</span>
+                      </div>
+
+                      {resolvedUrlData.durationFormatted && (
+                        <div className="px-2.5 py-1 rounded-md bg-zinc-950 border border-zinc-800 font-mono text-zinc-400">
+                          {resolvedUrlData.durationFormatted}
+                        </div>
+                      )}
+
+                      <a
+                        href={resolvedUrlData.url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="flex items-center gap-1 px-2.5 py-1 rounded-md bg-zinc-900 hover:bg-zinc-800 text-cyan-400 text-xs transition-colors"
+                      >
+                        <span>Buka Link</span>
+                        <ExternalLink className="h-3 w-3" />
+                      </a>
+                    </div>
+                  </div>
+                </div>
               </div>
             )}
-
-            {/* Manual Content ID */}
-            <div className="pt-2 flex items-center gap-2">
-              <input
-                type="text"
-                value={manualContentIdInput}
-                onChange={(e) => setManualContentIdInput(e.target.value)}
-                placeholder="Atau tambahkan Content ID manual (misal: 113958387982006_942538351814577)"
-                className="flex-1 px-3 py-2 rounded-xl border border-zinc-800 bg-zinc-950 text-zinc-200 focus:outline-none focus:border-emerald-500 font-mono text-xs"
-              />
-              <button
-                type="button"
-                onClick={() => {
-                  const val = manualContentIdInput.trim();
-                  if (val && !formSpecificContentIds.includes(val)) {
-                    setFormSpecificContentIds((prev) => [...prev, val]);
-                    setManualContentIdInput("");
-                  }
-                }}
-                className="px-4 py-2 rounded-xl bg-zinc-800 hover:bg-zinc-700 text-zinc-200 text-xs font-semibold"
-              >
-                Tambah ID
-              </button>
-            </div>
           </div>
         )}
       </div>
@@ -685,18 +1048,44 @@ export function EngagementStudio() {
           <div>
             <h3 className="text-sm font-semibold text-zinc-100 flex items-center gap-2">
               <MessageSquare className="h-4 w-4 text-amber-400" />
-              3. Akun Pengomentar & Persona AI ({formCommenters.length} Akun Otomatis)
+              3. Akun Pengomentar & Persona AI ({formCommenters.length} Akun Terpilih)
             </h3>
             <p className="text-xs text-zinc-400 mt-0.5">
-              Semua akun di platform yang sama otomatis ditugaskan peran berbeda. AI otomatis membaca JSON video untuk menyusun komentar natural gaya skena Jaksel.
+              Tentukan akun pengomentar dan variasikan peran unik (Pro, Kontra, Netral, Hate, dll) dengan jeda waktu aman antar user.
             </p>
           </div>
+
+          {/* Add extra commenter dropdown */}
+          {accounts.filter((a) => !formCommenters.some((c) => c.accountId === a.id)).length > 0 && (
+            <div className="flex items-center gap-2">
+              <select
+                onChange={(e) => {
+                  if (e.target.value) {
+                    handleAddCommenter(e.target.value);
+                    e.target.value = "";
+                  }
+                }}
+                defaultValue=""
+                className="px-3 py-1.5 rounded-xl border border-zinc-800 bg-zinc-950 text-zinc-200 text-xs focus:outline-none focus:border-emerald-500"
+              >
+                <option value="" disabled>
+                  + Tambah Akun Pengomentar Lain...
+                </option>
+                {accounts
+                  .filter((a) => !formCommenters.some((c) => c.accountId === a.id))
+                  .map((a) => (
+                    <option key={a.id} value={a.id}>
+                      {a.name} ({a.platform})
+                    </option>
+                  ))}
+              </select>
+            </div>
+          )}
         </div>
 
         {formCommenters.length === 0 ? (
           <div className="p-8 text-center border border-zinc-800/80 rounded-xl text-xs text-zinc-500 bg-zinc-950/40">
-            Tidak ada akun lain yang tersedia di platform yang sama ({targetAccountObj?.platform || "ini"}).
-            Silakan hubungkan minimal 2 akun di menu Social Accounts.
+            Belum ada akun pengomentar yang ditambahkan. Silakan pilih akun di atas atau hubungkan akun sosial media baru.
           </div>
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3.5">
@@ -723,9 +1112,19 @@ export function EngagementStudio() {
                       </span>
                     </div>
 
-                    <span className={`px-2 py-0.5 rounded border text-[10px] font-mono ${roleObj.badgeColor}`}>
-                      {roleObj.label}
-                    </span>
+                    <div className="flex items-center gap-2">
+                      <span className={`px-2 py-0.5 rounded border text-[10px] font-mono ${roleObj.badgeColor}`}>
+                        {roleObj.label}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => handleRemoveCommenter(idx)}
+                        className="p-1 rounded text-zinc-500 hover:text-rose-400 hover:bg-zinc-900 transition-colors"
+                        title="Hapus akun pengomentar ini"
+                      >
+                        <Trash2 className="h-3.5 w-3.5" />
+                      </button>
+                    </div>
                   </div>
 
                   <div className="space-y-1.5">
@@ -799,7 +1198,7 @@ export function EngagementStudio() {
                 onClick={() => setPreviewModalOpen(false)}
                 className="p-1 rounded-md text-zinc-500 hover:bg-zinc-800 hover:text-zinc-300"
               >
-                ✕
+                <X className="h-4 w-4" />
               </button>
             </div>
 

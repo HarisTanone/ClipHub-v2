@@ -78,7 +78,7 @@ def test_engagement_rules_lifecycle(client):
     assert res.status_code == 200
 
 def test_generate_comment_preview(client):
-    with patch("src.presentation.routes.social.engagement.route_chat", return_value="jujurly valid bgt nih kontennya 😭"):
+    with patch("src.presentation.routes.social.engagement.route_chat", return_value="jujurly valid bgt nih kontennya"):
         payload = {
             "metadata": {
                 "title": "Tutorial Masak Kilat",
@@ -119,17 +119,21 @@ def test_trigger_engagement_with_staggered_delay(client):
     mock_content_list = {
         "docs": [
             {
-                "id": "content_tt_123",
-                "title": "Video Terkini",
-                "description": "Deskripsi video",
-                "topic": "Vlog"
+                "id": "content_tt_old",
+                "title": "Video Lama",
+                "createdAt": "2026-01-01T00:00:00Z"
+            },
+            {
+                "id": "content_tt_newest",
+                "title": "Video Paling Baru",
+                "createdAt": "2026-04-01T12:00:00Z"
             }
         ]
     }
 
     with patch("src.presentation.routes.social.engagement.repliz_get", new_callable=AsyncMock) as mock_get, \
          patch("src.presentation.routes.social.engagement.repliz_post", new_callable=AsyncMock) as mock_post, \
-         patch("src.presentation.routes.social.engagement.route_chat", return_value="Keren parah nih! 🔥"):
+         patch("src.presentation.routes.social.engagement.route_chat", return_value="Keren parah nih!"):
 
         mock_get.return_value = mock_content_list
         mock_post.return_value = {"commentId": "repliz_comm_999"}
@@ -158,6 +162,8 @@ def test_trigger_engagement_with_staggered_delay(client):
         data = res.json()
         assert data["totalPosts"] == 1
         assert data["totalCommenters"] == 2
+        # Verify that the NEWEST post was chosen, not the first in unordered list
+        assert data["tasks"][0]["contentId"] == "content_tt_newest"
         task_id = data["tasks"][0]["taskId"]
 
         # Check tasks endpoint
@@ -201,3 +207,59 @@ def test_like_comment_and_content_comments_endpoints(client):
         assert res.status_code == 200
         assert len(res.json()["comments"]) == 1
         assert res.json()["comments"][0]["id"] == "comm_123"
+
+def test_resolve_video_url_endpoint(client):
+    class MockProc:
+        returncode = 0
+        stdout = json.dumps({"title": "Test Title", "description": "Test Desc", "uploader": "Test Channel", "duration": 120})
+
+    with patch("subprocess.run", return_value=MockProc()):
+        # Test TikTok resolution
+        res = client.post("/api/social/engagement/resolve-url", json={
+            "url": "https://www.tiktok.com/@tempovideo/video/7345678901234567890"
+        })
+        assert res.status_code == 200
+        data = res.json()
+        assert data["platform"] == "tiktok"
+        assert data["contentId"] == "7345678901234567890"
+
+        # Test YouTube resolution
+        res = client.post("/api/social/engagement/resolve-url", json={
+            "url": "https://www.youtube.com/watch?v=xEWpw4UEN0o"
+        })
+        assert res.status_code == 200
+        data = res.json()
+        assert data["platform"] == "youtube"
+        assert data["contentId"] == "xEWpw4UEN0o"
+
+        # Test Instagram resolution
+        res = client.post("/api/social/engagement/resolve-url", json={
+            "url": "https://www.instagram.com/reel/C3_abCdEfGh/"
+        })
+        assert res.status_code == 200
+        data = res.json()
+        assert data["platform"] == "instagram"
+        assert data["contentId"] == "C3_abCdEfGh"
+
+def test_trigger_direct_url_engagement(client):
+    with patch("src.presentation.routes.social.engagement.repliz_post", new_callable=AsyncMock) as mock_post, \
+         patch("src.presentation.routes.social.engagement.route_chat", return_value="Mantap infonya"):
+        mock_post.return_value = {"commentId": "repliz_comm_url_1"}
+
+        payload = {
+            "targetMode": "url",
+            "targetUrl": "https://www.tiktok.com/@tempovideo/video/7345678901234567890",
+            "delayMinutes": 0,
+            "commenters": [
+                {
+                    "accountId": "acc_bot_1",
+                    "accountName": "Bot 1",
+                    "persona": "Relate"
+                }
+            ]
+        }
+        res = client.post("/api/social/engagement/trigger", json=payload)
+        assert res.status_code == 200
+        data = res.json()
+        assert data["totalPosts"] == 1
+        assert data["tasks"][0]["contentId"] == "7345678901234567890"

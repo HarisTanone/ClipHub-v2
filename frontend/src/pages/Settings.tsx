@@ -1,4 +1,4 @@
-import { useState, useEffect, type ReactNode } from "react";
+import { useState, useEffect, useMemo, type ReactNode } from "react";
 import { Link, useParams, useNavigate, useLocation } from "react-router-dom";
 import {
   Save, Server, Cpu, Sparkles, Film, UserPlus, Trash2, AlertTriangle, Shield,
@@ -612,6 +612,8 @@ export function Settings() {
   const [channelInspectData, setChannelInspectData] = useState<AutopilotChannelInspectResult | null>(null);
   const [isLoadingPlaylistVideos, setIsLoadingPlaylistVideos] = useState<boolean>(false);
   const [playlistVideosData, setPlaylistVideosData] = useState<AutopilotPlaylistVideosResult | null>(null);
+  const [playlistSearchQuery, setPlaylistSearchQuery] = useState<string>("");
+  const [videoSearchQuery, setVideoSearchQuery] = useState<string>("");
 
   // Hermes Video Generator Auto-Post State
   const [hermesVideogenSettings, setHermesVideogenSettings] = useState<HermesVideoGenSettings | null>(null);
@@ -1216,7 +1218,7 @@ export function Settings() {
       const res = await autopilotApi.getPlaylistVideos({
         playlist_id: playlistId || undefined,
         channel_url: playlistId ? undefined : (channelUrl || undefined),
-        limit: 30,
+        limit: 50,
       });
       if (res && res.success && res.data) {
         setPlaylistVideosData(res.data);
@@ -1227,6 +1229,68 @@ export function Settings() {
       setIsLoadingPlaylistVideos(false);
     }
   }
+
+  async function handleSetManualTarget(videoId: string) {
+    if (!autopilotSettings) return;
+    const isAlreadyTarget = autopilotSettings.manual_target_video_id === videoId;
+    const nextTargetId = isAlreadyTarget ? "" : videoId;
+    const updated: AutopilotSettings = {
+      ...autopilotSettings,
+      manual_target_video_id: nextTargetId,
+    };
+    setAutopilotSettings(updated);
+    try {
+      const res = await autopilotApi.updateSettings(updated);
+      if (res && res.data) {
+        setAutopilotSettings(res.data);
+        if (nextTargetId) {
+          toast.success("Target manual video berhasil ditetapkan untuk eksekusi hari ini!");
+        } else {
+          toast.success("Target manual dibatalkan. Kembali ke strategi otomatis.");
+        }
+      }
+    } catch (e: any) {
+      toast.error("Gagal memperbarui target manual: " + (e?.message || ""));
+    }
+  }
+
+  const currentTargetInfo = useMemo(() => {
+    if (!playlistVideosData?.videos || playlistVideosData.videos.length === 0) return null;
+    const videos = playlistVideosData.videos;
+    const manualId = autopilotSettings?.manual_target_video_id;
+    if (manualId) {
+      const found = videos.find((v) => v.id === manualId);
+      if (found) return { video: found, reason: "Pilihan Manual", isManual: true };
+    }
+    const strat = autopilotSettings?.video_selection_strategy || "latest_2";
+    if (strat === "latest_1" || strat === "latest") {
+      const v1 = videos[0];
+      if (v1 && !v1.is_processed) {
+        return { video: v1, reason: "Video Terbaru (#1)", isManual: false };
+      }
+      return null;
+    }
+    if (strat === "latest_2") {
+      const v1 = videos[0];
+      const v2 = videos[1];
+      if (v2 && !v2.is_processed) {
+        return { video: v2, reason: "Buffer #2 (Terbaru Kedua)", isManual: false };
+      }
+      if (v1 && !v1.is_processed) {
+        return { video: v1, reason: "Buffer #1 (Terbaru)", isManual: false };
+      }
+      return null;
+    }
+    if (strat === "all_playlist") {
+      const unprocessed = videos.filter((v) => !v.is_processed);
+      if (unprocessed.length > 0) {
+        const oldest = unprocessed[unprocessed.length - 1];
+        return { video: oldest, reason: "Antrean Backlog Tertua", isManual: false };
+      }
+      return null;
+    }
+    return null;
+  }, [playlistVideosData, autopilotSettings]);
 
   async function handleInspectChannel(queryOverride?: string) {
     const q = (queryOverride !== undefined ? queryOverride : channelInput).trim();
@@ -3455,9 +3519,12 @@ export function Settings() {
               </Card>
             ) : (
               <div className="space-y-5">
-                {/* 1. TOP ROW: Master Daemon & Niche (Col-7) | Status Kuota & Manual Trigger (Col-5) */}
+                {/* 1. TOP ROW: Master Daemon & Niche (Col-6/7) | Status Kuota & Manual Trigger & Video List (Col-6/5) */}
                 <div className="grid grid-cols-1 lg:grid-cols-12 gap-5">
-                  <div className="lg:col-span-7 space-y-4">
+                  <div className={cn(
+                    autopilotSettings?.source_mode === "channel_playlist" ? "lg:col-span-6" : "lg:col-span-7",
+                    "space-y-4"
+                  )}>
                     {/* Master Switch Card */}
                     <Card className="p-4">
                       <div className="flex items-center justify-between">
@@ -3739,68 +3806,98 @@ export function Settings() {
                                 {/* Option B: Playlists & Shows / Podcasts List */}
                                 {channelInspectData.playlists && channelInspectData.playlists.length > 0 && (
                                   <div className="space-y-1.5 pt-1">
-                                    <span className="text-[10px] text-zinc-400 font-medium block">
-                                      Atau Pilih Playlist / Podcast Khusus ({channelInspectData.playlists.length} Ditemukan):
-                                    </span>
+                                    <div className="flex items-center justify-between">
+                                      <span className="text-[10px] text-zinc-400 font-medium block">
+                                        Atau Pilih Playlist / Podcast Khusus ({channelInspectData.playlists.length} Ditemukan):
+                                      </span>
+                                      {channelInspectData.playlists.length > 4 && (
+                                        <span className="text-[9px] text-zinc-500 font-mono">
+                                          {(channelInspectData.playlists || []).filter(pl =>
+                                            !playlistSearchQuery ||
+                                            pl.title.toLowerCase().includes(playlistSearchQuery.toLowerCase()) ||
+                                            pl.id.toLowerCase().includes(playlistSearchQuery.toLowerCase())
+                                          ).length} / {channelInspectData.playlists.length}
+                                        </span>
+                                      )}
+                                    </div>
+
+                                    {channelInspectData.playlists.length > 4 && (
+                                      <div className="relative">
+                                        <Search className="h-3 w-3 text-zinc-500 absolute left-2 top-2" />
+                                        <Input
+                                          value={playlistSearchQuery}
+                                          onChange={(e) => setPlaylistSearchQuery(e.target.value)}
+                                          placeholder="Filter judul playlist / podcast..."
+                                          className="h-7 text-xs pl-7 bg-zinc-950/60 border-zinc-800"
+                                        />
+                                      </div>
+                                    )}
+
                                     <div className="space-y-1.5 max-h-48 overflow-y-auto pr-1">
-                                      {channelInspectData.playlists.map((pl) => {
-                                        const isSelected = autopilotSettings?.source_type === "playlist" && autopilotSettings?.selected_playlist_id === pl.id;
-                                        return (
-                                          <div
-                                            key={pl.id}
-                                            onClick={() => {
-                                              if (autopilotSettings) {
-                                                const updated: AutopilotSettings = {
-                                                  ...autopilotSettings,
-                                                  source_mode: "channel_playlist",
-                                                  source_type: "playlist",
-                                                  selected_playlist_id: pl.id,
-                                                  selected_playlist_title: pl.title,
-                                                };
-                                                setAutopilotSettings(updated);
-                                                loadPlaylistVideosPreview(pl.id, undefined);
-                                              }
-                                            }}
-                                            className={cn(
-                                              "p-2 rounded-lg border text-xs cursor-pointer transition-all flex items-center justify-between gap-2",
-                                              isSelected
-                                                ? "bg-violet-950/40 border-violet-500/60 text-violet-200 shadow-sm"
-                                                : "bg-zinc-900/40 border-zinc-800/80 text-zinc-400 hover:border-zinc-700"
-                                            )}
-                                          >
-                                            <div className="flex items-center gap-2 min-w-0">
-                                              {pl.thumbnail ? (
-                                                <img
-                                                  src={pl.thumbnail}
-                                                  alt=""
-                                                  className="w-8 h-8 rounded object-cover shrink-0 border border-zinc-800"
-                                                />
-                                              ) : (
-                                                <div className="w-8 h-8 rounded bg-zinc-800 flex items-center justify-center shrink-0 text-zinc-500">
-                                                  <ListVideo className="h-4 w-4" />
-                                                </div>
+                                      {(channelInspectData.playlists || [])
+                                        .filter(pl =>
+                                          !playlistSearchQuery ||
+                                          pl.title.toLowerCase().includes(playlistSearchQuery.toLowerCase()) ||
+                                          pl.id.toLowerCase().includes(playlistSearchQuery.toLowerCase())
+                                        )
+                                        .map((pl) => {
+                                          const isSelected = autopilotSettings?.source_type === "playlist" && autopilotSettings?.selected_playlist_id === pl.id;
+                                          return (
+                                            <div
+                                              key={pl.id}
+                                              onClick={() => {
+                                                if (autopilotSettings) {
+                                                  const updated: AutopilotSettings = {
+                                                    ...autopilotSettings,
+                                                    source_mode: "channel_playlist",
+                                                    source_type: "playlist",
+                                                    selected_playlist_id: pl.id,
+                                                    selected_playlist_title: pl.title,
+                                                  };
+                                                  setAutopilotSettings(updated);
+                                                  loadPlaylistVideosPreview(pl.id, undefined);
+                                                }
+                                              }}
+                                              className={cn(
+                                                "p-2 rounded-lg border text-xs cursor-pointer transition-all flex items-center justify-between gap-2",
+                                                isSelected
+                                                  ? "bg-violet-950/40 border-violet-500/60 text-violet-200 shadow-sm"
+                                                  : "bg-zinc-900/40 border-zinc-800/80 text-zinc-400 hover:border-zinc-700"
                                               )}
-                                              <div className="min-w-0">
-                                                <span className="font-semibold text-zinc-200 block text-[11px] truncate" title={pl.title}>
-                                                  {pl.title}
-                                                </span>
-                                                <div className="flex items-center gap-1.5 mt-0.5">
-                                                  <Badge variant="default" className="text-[8px] py-0 px-1 uppercase font-bold text-violet-300 bg-violet-500/10 border-violet-500/30">
-                                                    {pl.type}
-                                                  </Badge>
-                                                  <span className="text-[9px] text-zinc-500 font-mono">ID: {pl.id}</span>
+                                            >
+                                              <div className="flex items-center gap-2 min-w-0">
+                                                {pl.thumbnail ? (
+                                                  <img
+                                                    src={pl.thumbnail}
+                                                    alt=""
+                                                    className="w-8 h-8 rounded object-cover shrink-0 border border-zinc-800"
+                                                  />
+                                                ) : (
+                                                  <div className="w-8 h-8 rounded bg-zinc-800 flex items-center justify-center shrink-0 text-zinc-500">
+                                                    <ListVideo className="h-4 w-4" />
+                                                  </div>
+                                                )}
+                                                <div className="min-w-0">
+                                                  <span className="font-semibold text-zinc-200 block text-[11px] truncate" title={pl.title}>
+                                                    {pl.title}
+                                                  </span>
+                                                  <div className="flex items-center gap-1.5 mt-0.5">
+                                                    <Badge variant="default" className="text-[8px] py-0 px-1 uppercase font-bold text-violet-300 bg-violet-500/10 border-violet-500/30">
+                                                      {pl.type}
+                                                    </Badge>
+                                                    <span className="text-[9px] text-zinc-500 font-mono">ID: {pl.id}</span>
+                                                  </div>
                                                 </div>
                                               </div>
+                                              <input
+                                                type="radio"
+                                                checked={isSelected}
+                                                readOnly
+                                                className="text-violet-600 focus:ring-violet-500 h-3.5 w-3.5 shrink-0"
+                                              />
                                             </div>
-                                            <input
-                                              type="radio"
-                                              checked={isSelected}
-                                              readOnly
-                                              className="text-violet-600 focus:ring-violet-500 h-3.5 w-3.5 shrink-0"
-                                            />
-                                          </div>
-                                        );
-                                      })}
+                                          );
+                                        })}
                                     </div>
                                   </div>
                                 )}
@@ -3815,7 +3912,7 @@ export function Settings() {
                               <span>Strategi Pengambilan Video Harian</span>
                             </label>
 
-                            <div className="space-y-2">
+                            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
                               {/* Strategy 1: Buffer 2 Video Terakhir */}
                               <div
                                 onClick={() => {
@@ -3824,31 +3921,31 @@ export function Settings() {
                                   }
                                 }}
                                 className={cn(
-                                  "p-3 rounded-xl border text-xs cursor-pointer transition-all",
+                                  "p-2.5 rounded-lg border text-xs cursor-pointer transition-all flex flex-col justify-between",
                                   (autopilotSettings?.video_selection_strategy || "latest_2") === "latest_2"
-                                    ? "bg-violet-950/30 border-violet-500/60 text-violet-200 shadow-sm"
+                                    ? "bg-violet-950/30 border-violet-500/60 text-violet-200 shadow-sm ring-1 ring-violet-500/30"
                                     : "bg-zinc-900/40 border-zinc-800 text-zinc-400 hover:border-zinc-700"
                                 )}
                               >
-                                <div className="flex items-center justify-between mb-1">
-                                  <div className="flex items-center gap-2">
+                                <div>
+                                  <div className="flex items-center justify-between mb-1">
+                                    <span className="font-semibold text-zinc-100 text-[11px]">
+                                      Buffer 2 Video
+                                    </span>
                                     <input
                                       type="radio"
                                       checked={(autopilotSettings?.video_selection_strategy || "latest_2") === "latest_2"}
                                       readOnly
-                                      className="text-violet-600 focus:ring-violet-500 h-3.5 w-3.5"
+                                      className="text-violet-600 focus:ring-violet-500 h-3 w-3 shrink-0"
                                     />
-                                    <span className="font-semibold text-zinc-100 text-xs">
-                                      Buffer 2 Video Terakhir
-                                    </span>
-                                    <span className="text-[9px] bg-violet-500/20 text-violet-300 border border-violet-500/30 px-1.5 py-0.5 rounded font-medium">
-                                      Rekomendasi Stok
-                                    </span>
                                   </div>
+                                  <span className="text-[9px] text-violet-300 font-medium block mb-1">
+                                    Rekomendasi Stok
+                                  </span>
+                                  <p className="text-[10px] text-zinc-400 leading-snug">
+                                    Pantau 2 video terbaru. Proses video #2 hari ini, lalu video #1 berikutnya.
+                                  </p>
                                 </div>
-                                <p className="text-[10px] text-zinc-400 pl-5 leading-relaxed">
-                                  Sistem memantau 2 video terbaru. Proses video ke-2 (vid 2) terlebih dahulu hari ini, lalu video teratas (vid 1) di hari berikutnya. Dengan begitu stok video tidak cepat habis saat belum ada rilis baru.
-                                </p>
                               </div>
 
                               {/* Strategy 2: Selalu Ambil Video Terbaru */}
@@ -3859,28 +3956,31 @@ export function Settings() {
                                   }
                                 }}
                                 className={cn(
-                                  "p-3 rounded-xl border text-xs cursor-pointer transition-all",
+                                  "p-2.5 rounded-lg border text-xs cursor-pointer transition-all flex flex-col justify-between",
                                   autopilotSettings?.video_selection_strategy === "latest_1" || autopilotSettings?.video_selection_strategy === "latest"
-                                    ? "bg-violet-950/30 border-violet-500/60 text-violet-200 shadow-sm"
+                                    ? "bg-violet-950/30 border-violet-500/60 text-violet-200 shadow-sm ring-1 ring-violet-500/30"
                                     : "bg-zinc-900/40 border-zinc-800 text-zinc-400 hover:border-zinc-700"
                                 )}
                               >
-                                <div className="flex items-center justify-between mb-1">
-                                  <div className="flex items-center gap-2">
+                                <div>
+                                  <div className="flex items-center justify-between mb-1">
+                                    <span className="font-semibold text-zinc-100 text-[11px]">
+                                      Video Terbaru
+                                    </span>
                                     <input
                                       type="radio"
                                       checked={autopilotSettings?.video_selection_strategy === "latest_1" || autopilotSettings?.video_selection_strategy === "latest"}
                                       readOnly
-                                      className="text-violet-600 focus:ring-violet-500 h-3.5 w-3.5"
+                                      className="text-violet-600 focus:ring-violet-500 h-3 w-3 shrink-0"
                                     />
-                                    <span className="font-semibold text-zinc-100 text-xs">
-                                      Selalu Ambil Video Terbaru (Direct Latest)
-                                    </span>
                                   </div>
+                                  <span className="text-[9px] text-zinc-400 font-medium block mb-1">
+                                    Direct Latest
+                                  </span>
+                                  <p className="text-[10px] text-zinc-400 leading-snug">
+                                    Langsung memproses video teratas (#1) paling baru saat dirilis.
+                                  </p>
                                 </div>
-                                <p className="text-[10px] text-zinc-400 pl-5 leading-relaxed">
-                                  Setiap pagi sistem langsung mengambil dan memproses video paling baru (vid 1) saat dirilis.
-                                </p>
                               </div>
 
                               {/* Strategy 3: Seluruh Playlist Antrean */}
@@ -3891,179 +3991,43 @@ export function Settings() {
                                   }
                                 }}
                                 className={cn(
-                                  "p-3 rounded-xl border text-xs cursor-pointer transition-all",
+                                  "p-2.5 rounded-lg border text-xs cursor-pointer transition-all flex flex-col justify-between",
                                   autopilotSettings?.video_selection_strategy === "all_playlist"
-                                    ? "bg-violet-950/30 border-violet-500/60 text-violet-200 shadow-sm"
+                                    ? "bg-violet-950/30 border-violet-500/60 text-violet-200 shadow-sm ring-1 ring-violet-500/30"
                                     : "bg-zinc-900/40 border-zinc-800 text-zinc-400 hover:border-zinc-700"
                                 )}
                               >
-                                <div className="flex items-center justify-between mb-1">
-                                  <div className="flex items-center gap-2">
+                                <div>
+                                  <div className="flex items-center justify-between mb-1">
+                                    <span className="font-semibold text-zinc-100 text-[11px]">
+                                      Seluruh Playlist
+                                    </span>
                                     <input
                                       type="radio"
                                       checked={autopilotSettings?.video_selection_strategy === "all_playlist"}
                                       readOnly
-                                      className="text-violet-600 focus:ring-violet-500 h-3.5 w-3.5"
+                                      className="text-violet-600 focus:ring-violet-500 h-3 w-3 shrink-0"
                                     />
-                                    <span className="font-semibold text-zinc-100 text-xs">
-                                      Proses Seluruh Video Playlist (Antrean Backlog)
-                                    </span>
                                   </div>
+                                  <span className="text-[9px] text-zinc-400 font-medium block mb-1">
+                                    Antrean Backlog
+                                  </span>
+                                  <p className="text-[10px] text-zinc-400 leading-snug">
+                                    Memproses semua video dari yang paling lama ke baru secara bertahap.
+                                  </p>
                                 </div>
-                                <p className="text-[10px] text-zinc-400 pl-5 leading-relaxed">
-                                  Memproses semua video yang belum pernah dipotong dalam playlist secara bertahap satu per satu setiap hari (dari yang paling lama ke baru).
-                                </p>
                               </div>
                             </div>
-                          </div>
-
-                          {/* LIVE VIDEO LIST PREVIEW */}
-                          <div className="space-y-2 pt-2 border-t border-zinc-800/80">
-                            <div className="flex items-center justify-between">
-                              <div className="flex items-center gap-1.5">
-                                <Film className="h-3.5 w-3.5 text-zinc-400" />
-                                <span className="text-[11px] font-semibold text-zinc-200">
-                                  Daftar Video di Sumber Terpilih {playlistVideosData ? `(${playlistVideosData.videos.length} Video)` : ""}
-                                </span>
-                              </div>
-
-                              <Button
-                                type="button"
-                                onClick={() => {
-                                  loadPlaylistVideosPreview(
-                                    autopilotSettings?.source_type === "playlist" ? autopilotSettings?.selected_playlist_id : undefined,
-                                    autopilotSettings?.channel_url
-                                  );
-                                }}
-                                loading={isLoadingPlaylistVideos}
-                                variant="ghost"
-                                size="sm"
-                                className="h-6 px-2 text-[10px]"
-                                icon={<RefreshCw className="h-2.5 w-2.5" />}
-                              >
-                                Refresh Video
-                              </Button>
-                            </div>
-
-                            {isLoadingPlaylistVideos ? (
-                              <div className="p-6 text-center text-xs text-zinc-400 bg-zinc-900/40 rounded-xl border border-zinc-800/80">
-                                <RefreshCw className="h-4 w-4 text-violet-400 animate-spin mx-auto mb-2" />
-                                <span>Mengambil daftar video dari YouTube...</span>
-                              </div>
-                            ) : !playlistVideosData || playlistVideosData.videos.length === 0 ? (
-                              <div className="p-6 text-center text-xs text-zinc-500 bg-zinc-900/40 rounded-xl border border-zinc-800/80">
-                                Klik tombol &quot;Periksa&quot; di atas untuk menampilkan daftar video dari channel / playlist ini.
-                              </div>
-                            ) : (
-                              <div className="space-y-1.5 max-h-72 overflow-y-auto pr-1">
-                                {playlistVideosData.videos.map((vid, vIdx) => {
-                                  const strat = autopilotSettings?.video_selection_strategy || "latest_2";
-                                  let isTarget = false;
-                                  let isNextBuffer = false;
-                                  const unprocessedVideos = playlistVideosData.videos.filter(v => !v.is_processed);
-
-                                  if (strat === "latest_2") {
-                                    if (unprocessedVideos.length >= 2) {
-                                      if (vid.id === unprocessedVideos[1].id) isTarget = true;
-                                      else if (vid.id === unprocessedVideos[0].id) isNextBuffer = true;
-                                    } else if (unprocessedVideos.length === 1 && vid.id === unprocessedVideos[0].id) {
-                                      isTarget = true;
-                                    }
-                                  } else if (strat === "latest" || strat === "latest_1") {
-                                    if (unprocessedVideos.length > 0 && vid.id === unprocessedVideos[0].id) {
-                                      isTarget = true;
-                                    }
-                                  } else if (strat === "all_playlist") {
-                                    if (unprocessedVideos.length > 0 && vid.id === unprocessedVideos[unprocessedVideos.length - 1].id) {
-                                      isTarget = true;
-                                    }
-                                  }
-
-                                  return (
-                                    <div
-                                      key={vid.id}
-                                      className={cn(
-                                        "p-2 rounded-lg border text-xs flex items-center justify-between gap-2.5 transition-colors",
-                                        vid.is_processed
-                                          ? "bg-zinc-950/40 border-zinc-800/50 opacity-60"
-                                          : isTarget
-                                          ? "bg-emerald-950/30 border-emerald-500/60 text-emerald-200 shadow-sm"
-                                          : isNextBuffer
-                                          ? "bg-violet-950/20 border-violet-500/40 text-violet-200"
-                                          : "bg-zinc-900/50 border-zinc-800 text-zinc-300"
-                                      )}
-                                    >
-                                      <div className="flex items-center gap-2.5 min-w-0">
-                                        <span className="text-[10px] font-mono text-zinc-500 w-4 text-center shrink-0">
-                                          #{vIdx + 1}
-                                        </span>
-
-                                        <div className="relative w-14 h-9 rounded overflow-hidden shrink-0 bg-zinc-800 border border-zinc-700/60">
-                                          <img
-                                            src={vid.thumbnail}
-                                            alt=""
-                                            className="w-full h-full object-cover"
-                                            loading="lazy"
-                                          />
-                                          <span className="absolute bottom-0.5 right-0.5 bg-black/80 text-[8px] font-mono px-1 rounded text-zinc-300">
-                                            {vid.duration_formatted}
-                                          </span>
-                                        </div>
-
-                                        <div className="min-w-0">
-                                          <span className="font-semibold text-zinc-200 block text-[11px] truncate" title={vid.title}>
-                                            {vid.title}
-                                          </span>
-                                          <div className="flex items-center gap-2 mt-0.5">
-                                            <span className="text-[9px] text-zinc-500 font-mono">ID: {vid.id}</span>
-                                            <a
-                                              href={vid.url}
-                                              target="_blank"
-                                              rel="noreferrer"
-                                              className="text-[9px] text-violet-400 hover:text-violet-300 inline-flex items-center gap-0.5"
-                                            >
-                                              <span>Tonton</span>
-                                              <ExternalLink className="h-2 w-2" />
-                                            </a>
-                                          </div>
-                                        </div>
-                                      </div>
-
-                                      <div className="shrink-0 text-right">
-                                        {vid.is_processed ? (
-                                          <span className="inline-flex items-center gap-1 text-[9px] text-zinc-400 bg-zinc-800/80 px-2 py-0.5 rounded border border-zinc-700">
-                                            <CheckCircle2 className="h-2.5 w-2.5 text-zinc-400" />
-                                            <span>Sudah Diproses</span>
-                                          </span>
-                                        ) : isTarget ? (
-                                          <span className="inline-flex items-center gap-1 text-[9px] font-semibold text-emerald-300 bg-emerald-500/20 px-2 py-0.5 rounded border border-emerald-500/40 animate-pulse">
-                                            <Zap className="h-2.5 w-2.5 text-emerald-400" />
-                                            <span>Target Hari Ini</span>
-                                          </span>
-                                        ) : isNextBuffer ? (
-                                          <span className="inline-flex items-center gap-1 text-[9px] font-medium text-violet-300 bg-violet-500/20 px-2 py-0.5 rounded border border-violet-500/30">
-                                            <Clock className="h-2.5 w-2.5 text-violet-400" />
-                                            <span>Target Berikutnya</span>
-                                          </span>
-                                        ) : (
-                                          <span className="inline-flex items-center gap-1 text-[9px] text-zinc-400 bg-zinc-800/50 px-2 py-0.5 rounded border border-zinc-700/60">
-                                            <Clock className="h-2.5 w-2.5 text-zinc-500" />
-                                            <span>Dalam Antrean</span>
-                                          </span>
-                                        )}
-                                      </div>
-                                    </div>
-                                  );
-                                })}
-                              </div>
-                            )}
                           </div>
                         </div>
                       )}
                     </Card>
                   </div>
 
-                  <div className="lg:col-span-5 space-y-4">
+                  <div className={cn(
+                    autopilotSettings?.source_mode === "channel_playlist" ? "lg:col-span-6" : "lg:col-span-5",
+                    "space-y-4"
+                  )}>
                     {/* Today Run Trigger Card */}
                     <Card className="p-4 border-violet-500/20 bg-gradient-to-b from-violet-950/20 to-zinc-900/60">
                       <div className="flex items-center justify-between mb-3">
@@ -4095,7 +4059,7 @@ export function Settings() {
                         </div>
                         <div className="flex items-center justify-between text-xs">
                           <span className="text-zinc-400">Mode Sumber:</span>
-                          <span className="text-zinc-200 font-medium truncate max-w-[170px]" title={autopilotSettings?.source_mode === "channel_playlist" ? (autopilotSettings.selected_playlist_title || autopilotSettings.channel_title || "Channel / Playlist") : `AI Discovery (${autopilotSettings?.niche_query || "Niche"})`}>
+                          <span className="text-zinc-200 font-medium truncate max-w-[200px]" title={autopilotSettings?.source_mode === "channel_playlist" ? (autopilotSettings.selected_playlist_title || autopilotSettings.channel_title || "Channel / Playlist") : `AI Discovery (${autopilotSettings?.niche_query || "Niche"})`}>
                             {autopilotSettings?.source_mode === "channel_playlist"
                               ? (autopilotSettings.selected_playlist_title || autopilotSettings.channel_title || "Channel / Playlist")
                               : "AI Viral Discovery"}
@@ -4105,8 +4069,52 @@ export function Settings() {
                           <span className="text-zinc-400">Jadwal Harian:</span>
                           <span className="text-zinc-200">{autopilotSettings?.run_time || "05:00"} WIB</span>
                         </div>
+
+                        {/* Current Target Video Preview if Channel/Playlist Mode */}
+                        {autopilotSettings?.source_mode === "channel_playlist" && (
+                          <div className="pt-2 border-t border-zinc-800/80 space-y-1">
+                            <div className="flex items-center justify-between text-xs">
+                              <span className="text-zinc-400">Target Hari Ini:</span>
+                              <span className={cn(
+                                "text-[10px] font-medium px-1.5 py-0.5 rounded border",
+                                currentTargetInfo?.isManual
+                                  ? "bg-emerald-500/20 text-emerald-300 border-emerald-500/30"
+                                  : currentTargetInfo
+                                  ? "bg-violet-500/20 text-violet-300 border-violet-500/30"
+                                  : "bg-zinc-800 text-zinc-400 border-zinc-700"
+                              )}>
+                                {currentTargetInfo ? currentTargetInfo.reason : "Menunggu Video Baru"}
+                              </span>
+                            </div>
+                            {currentTargetInfo ? (
+                              <div className="flex items-center gap-2 p-1.5 rounded-lg bg-zinc-950/60 border border-zinc-800/90">
+                                <div className="relative w-12 h-8 rounded overflow-hidden shrink-0 bg-zinc-800 border border-zinc-700/60">
+                                  <img
+                                    src={currentTargetInfo.video.thumbnail}
+                                    alt=""
+                                    className="w-full h-full object-cover"
+                                  />
+                                  <span className="absolute bottom-0.5 right-0.5 bg-black/80 text-[7px] font-mono px-0.5 rounded text-zinc-300">
+                                    {currentTargetInfo.video.duration_formatted}
+                                  </span>
+                                </div>
+                                <div className="min-w-0 flex-1">
+                                  <p className="text-[11px] text-zinc-200 line-clamp-1 font-medium" title={currentTargetInfo.video.title}>
+                                    {currentTargetInfo.video.title}
+                                  </p>
+                                  <span className="text-[9px] text-zinc-500 font-mono">ID: {currentTargetInfo.video.id}</span>
+                                </div>
+                              </div>
+                            ) : (
+                              <p className="text-[10px] text-amber-400/90 italic pt-0.5">
+                                Stok video dalam cakupan strategi sudah diproses. Menunggu rilis video publik baru.
+                              </p>
+                            )}
+                          </div>
+                        )}
+
                         {autopilotSettings?.last_video_title && (
-                          <div className="pt-1 border-t border-zinc-800/80">
+                          <div className="pt-2 border-t border-zinc-800/80">
                             <span className="text-[10px] text-zinc-500 block mb-0.5">Video Terakhir:</span>
                             <p className="text-xs text-zinc-300 line-clamp-2 font-medium">
                               {autopilotSettings.last_video_title}
@@ -4145,6 +4153,230 @@ export function Settings() {
                         )}
                       </div>
                     </Card>
+
+                    {/* LIVE VIDEO LIST PREVIEW (Mode Channel & Playlist) */}
+                    {autopilotSettings?.source_mode === "channel_playlist" && (
+                      <Card className="p-4 space-y-3">
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center gap-1.5">
+                            <Film className="h-4 w-4 text-violet-400" />
+                            <div>
+                              <h3 className="text-xs font-semibold text-zinc-200">
+                                Daftar Video di Sumber Terpilih
+                              </h3>
+                              {playlistVideosData && (
+                                <span className="text-[10px] text-zinc-400 block">
+                                  Menampilkan {playlistVideosData.videos.length}
+                                  {playlistVideosData.playlist_count && playlistVideosData.playlist_count > playlistVideosData.videos.length
+                                    ? ` dari total ${playlistVideosData.playlist_count}`
+                                    : ""} Video di Playlist
+                                </span>
+                              )}
+                            </div>
+                          </div>
+
+                          <Button
+                            type="button"
+                            onClick={() => {
+                              loadPlaylistVideosPreview(
+                                autopilotSettings?.source_type === "playlist" ? autopilotSettings?.selected_playlist_id : undefined,
+                                autopilotSettings?.channel_url
+                              );
+                            }}
+                            loading={isLoadingPlaylistVideos}
+                            variant="ghost"
+                            size="sm"
+                            className="h-7 px-2 text-xs"
+                            icon={<RefreshCw className="h-3 w-3" />}
+                          >
+                            Refresh
+                          </Button>
+                        </div>
+
+                        {/* Video filter search */}
+                        {playlistVideosData && playlistVideosData.videos.length > 4 && (
+                          <div className="relative">
+                            <Search className="h-3 w-3 text-zinc-500 absolute left-2.5 top-2.5" />
+                            <Input
+                              value={videoSearchQuery}
+                              onChange={(e) => setVideoSearchQuery(e.target.value)}
+                              placeholder="Cari video berdasarkan judul atau ID..."
+                              className="h-8 text-xs pl-8 bg-zinc-950/60 border-zinc-800"
+                            />
+                          </div>
+                        )}
+
+                        {isLoadingPlaylistVideos ? (
+                          <div className="p-8 text-center text-xs text-zinc-400 bg-zinc-900/40 rounded-xl border border-zinc-800/80">
+                            <RefreshCw className="h-4 w-4 text-violet-400 animate-spin mx-auto mb-2" />
+                            <span>Mengambil daftar video dari YouTube...</span>
+                          </div>
+                        ) : !playlistVideosData || playlistVideosData.videos.length === 0 ? (
+                          <div className="p-8 text-center text-xs text-zinc-500 bg-zinc-900/40 rounded-xl border border-zinc-800/80">
+                            Klik tombol &quot;Periksa&quot; di sebelah kiri untuk memuat daftar video dari channel / playlist ini.
+                          </div>
+                        ) : (
+                          <div className="space-y-1.5 max-h-[460px] overflow-y-auto pr-1">
+                            {(playlistVideosData.videos || [])
+                              .filter((v) =>
+                                !videoSearchQuery ||
+                                v.title.toLowerCase().includes(videoSearchQuery.toLowerCase()) ||
+                                v.id.toLowerCase().includes(videoSearchQuery.toLowerCase())
+                              )
+                              .map((vid) => {
+                                const vIdx = playlistVideosData.videos.findIndex((v) => v.id === vid.id);
+                                const strat = autopilotSettings?.video_selection_strategy || "latest_2";
+                                const manualId = autopilotSettings?.manual_target_video_id || "";
+                                const isManualTarget = Boolean(manualId && vid.id === manualId);
+
+                                let isTarget = false;
+                                let isNextBuffer = false;
+                                let badgeLabel = "";
+
+                                if (isManualTarget) {
+                                  isTarget = true;
+                                  badgeLabel = "Target Hari Ini (Manual)";
+                                } else if (!manualId) {
+                                  if (strat === "latest_2") {
+                                    const v1 = playlistVideosData.videos[0];
+                                    const v2 = playlistVideosData.videos[1];
+                                    if (vIdx === 1) {
+                                      if (!v2?.is_processed) {
+                                        isTarget = true;
+                                        badgeLabel = "Target Hari Ini (Buffer #2)";
+                                      }
+                                    } else if (vIdx === 0) {
+                                      if (v2 && !v2.is_processed) {
+                                        isNextBuffer = true;
+                                        badgeLabel = "Target Berikutnya (Buffer #1)";
+                                      } else if (v2 && v2.is_processed && !v1?.is_processed) {
+                                        isTarget = true;
+                                        badgeLabel = "Target Hari Ini (Buffer #1)";
+                                      }
+                                    }
+                                  } else if (strat === "latest" || strat === "latest_1") {
+                                    if (vIdx === 0) {
+                                      if (!vid.is_processed) {
+                                        isTarget = true;
+                                        badgeLabel = "Target Hari Ini (Video Terbaru)";
+                                      }
+                                    }
+                                  } else if (strat === "all_playlist") {
+                                    const unprocessed = playlistVideosData.videos.filter((v) => !v.is_processed);
+                                    if (unprocessed.length > 0 && vid.id === unprocessed[unprocessed.length - 1].id) {
+                                      isTarget = true;
+                                      badgeLabel = "Target Hari Ini (Backlog)";
+                                    } else if (!vid.is_processed) {
+                                      isNextBuffer = true;
+                                      badgeLabel = "Dalam Antrean";
+                                    }
+                                  }
+                                }
+
+                                return (
+                                  <div
+                                    key={vid.id}
+                                    className={cn(
+                                      "p-2 rounded-lg border text-xs flex items-center justify-between gap-2 transition-colors",
+                                      vid.is_processed && !isManualTarget
+                                        ? "bg-zinc-950/40 border-zinc-800/50 opacity-60"
+                                        : isTarget
+                                        ? "bg-emerald-950/30 border-emerald-500/60 text-emerald-200 shadow-sm"
+                                        : isNextBuffer
+                                        ? "bg-violet-950/20 border-violet-500/40 text-violet-200"
+                                        : "bg-zinc-900/50 border-zinc-800 text-zinc-300"
+                                    )}
+                                  >
+                                    <div className="flex items-center gap-2 min-w-0">
+                                      <span className="text-[10px] font-mono text-zinc-500 w-5 text-center shrink-0">
+                                        #{vIdx + 1}
+                                      </span>
+
+                                      <div className="relative w-14 h-9 rounded overflow-hidden shrink-0 bg-zinc-800 border border-zinc-700/60">
+                                        <img
+                                          src={vid.thumbnail}
+                                          alt=""
+                                          className="w-full h-full object-cover"
+                                          loading="lazy"
+                                        />
+                                        <span className="absolute bottom-0.5 right-0.5 bg-black/80 text-[8px] font-mono px-1 rounded text-zinc-300">
+                                          {vid.duration_formatted}
+                                        </span>
+                                      </div>
+
+                                      <div className="min-w-0">
+                                        <span className="font-semibold text-zinc-200 block text-[11px] truncate" title={vid.title}>
+                                          {vid.title}
+                                        </span>
+                                        <div className="flex items-center gap-2 mt-0.5">
+                                          <span className="text-[9px] text-zinc-500 font-mono">ID: {vid.id}</span>
+                                          <a
+                                            href={vid.url}
+                                            target="_blank"
+                                            rel="noreferrer"
+                                            className="text-[9px] text-violet-400 hover:text-violet-300 inline-flex items-center gap-0.5"
+                                          >
+                                            <span>Tonton</span>
+                                            <ExternalLink className="h-2 w-2" />
+                                          </a>
+                                        </div>
+                                      </div>
+                                    </div>
+
+                                    <div className="shrink-0 flex items-center gap-1.5 text-right">
+                                      {vid.is_processed && !isManualTarget ? (
+                                        <span className="inline-flex items-center gap-1 text-[9px] text-zinc-400 bg-zinc-800/80 px-2 py-0.5 rounded border border-zinc-700">
+                                          <CheckCircle2 className="h-2.5 w-2.5 text-zinc-400" />
+                                          <span>Sudah Diproses</span>
+                                        </span>
+                                      ) : isTarget ? (
+                                        <span className="inline-flex items-center gap-1 text-[9px] font-semibold text-emerald-300 bg-emerald-500/20 px-2 py-0.5 rounded border border-emerald-500/40 animate-pulse">
+                                          <Zap className="h-2.5 w-2.5 text-emerald-400" />
+                                          <span>{badgeLabel}</span>
+                                        </span>
+                                      ) : isNextBuffer ? (
+                                        <span className="inline-flex items-center gap-1 text-[9px] font-medium text-violet-300 bg-violet-500/20 px-2 py-0.5 rounded border border-violet-500/30">
+                                          <Clock className="h-2.5 w-2.5 text-violet-400" />
+                                          <span>{badgeLabel}</span>
+                                        </span>
+                                      ) : (
+                                        <span className="inline-flex items-center gap-1 text-[9px] text-zinc-500 bg-zinc-800/40 px-1.5 py-0.5 rounded border border-zinc-800">
+                                          <span>Antrean</span>
+                                        </span>
+                                      )}
+
+                                      {/* Manual Target Trigger Button */}
+                                      {isManualTarget ? (
+                                        <Button
+                                          type="button"
+                                          size="sm"
+                                          variant="outline"
+                                          onClick={() => handleSetManualTarget(vid.id)}
+                                          className="h-6 px-1.5 text-[9px] text-red-400 hover:text-red-300 border-red-500/30 hover:bg-red-950/20"
+                                          title="Batalkan target manual ini dan kembali ke otomatis"
+                                        >
+                                          Batal
+                                        </Button>
+                                      ) : (
+                                        <Button
+                                          type="button"
+                                          size="sm"
+                                          variant="ghost"
+                                          onClick={() => handleSetManualTarget(vid.id)}
+                                          className="h-6 px-1.5 text-[9px] text-zinc-400 hover:text-zinc-200 border border-zinc-800 hover:bg-zinc-800/60"
+                                          title={vid.is_processed ? "Paksa jadikan target manual hari ini (proses ulang)" : "Pilih video ini sebagai target eksekusi hari ini"}
+                                        >
+                                          Pilih
+                                        </Button>
+                                      )}
+                                    </div>
+                                  </div>
+                                );
+                              })}
+                          </div>
+                        )}
+                      </Card>
+                    )}
                   </div>
                 </div>
 

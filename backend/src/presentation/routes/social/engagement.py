@@ -3,6 +3,10 @@ import asyncio
 import datetime as dt
 import json
 import logging
+import re
+import subprocess
+import urllib.parse
+import urllib.request
 from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -35,6 +39,7 @@ def _init_engagement_db():
                 target_account_name TEXT DEFAULT '',
                 target_platform TEXT DEFAULT 'tiktok',
                 target_mode TEXT DEFAULT 'latest',
+                target_url TEXT DEFAULT '',
                 specific_content_id TEXT DEFAULT '',
                 is_active INTEGER DEFAULT 1,
                 delay_minutes INTEGER DEFAULT 5,
@@ -51,6 +56,8 @@ def _init_engagement_db():
             cur.execute("ALTER TABLE social_engagement_rules ADD COLUMN target_platform TEXT DEFAULT 'tiktok'")
         if "target_mode" not in cols:
             cur.execute("ALTER TABLE social_engagement_rules ADD COLUMN target_mode TEXT DEFAULT 'latest'")
+        if "target_url" not in cols:
+            cur.execute("ALTER TABLE social_engagement_rules ADD COLUMN target_url TEXT DEFAULT ''")
         if "specific_content_id" not in cols:
             cur.execute("ALTER TABLE social_engagement_rules ADD COLUMN specific_content_id TEXT DEFAULT ''")
         if "delay_minutes" not in cols:
@@ -122,7 +129,8 @@ class EngagementRulePayload(BaseModel):
     targetAccountId: str
     targetAccountName: Optional[str] = ""
     targetPlatform: Optional[str] = Field("tiktok", description="Platform target (tiktok, instagram, etc)")
-    targetMode: str = Field("latest", description="'latest' atau 'specific'")
+    targetMode: str = Field("latest", description="'latest', 'specific', atau 'url'")
+    targetUrl: Optional[str] = Field("", description="URL video langsung jika targetMode 'url'")
     specificContentIds: List[str] = Field(default_factory=list, description="List content ID jika mode specific")
     specificContentId: Optional[str] = Field("", description="Backward compatibility single content ID")
     isActive: bool = True
@@ -143,13 +151,18 @@ class GenerateCommentPreviewRequest(BaseModel):
 class TriggerEngagementRequest(BaseModel):
     ruleId: Optional[int] = None
     targetAccountId: Optional[str] = None
-    targetMode: Optional[str] = None  # 'latest' | 'specific'
+    targetMode: Optional[str] = None  # 'latest' | 'specific' | 'url'
+    targetUrl: Optional[str] = None  # Direct video URL
     contentId: Optional[str] = None  # Specific single contentId override
     contentIds: Optional[List[str]] = None  # Multiple contentIds override
     metadata: Optional[Dict[str, Any]] = None
     delayMinutes: Optional[int] = None
     autoLikeComments: Optional[bool] = None
     commenters: Optional[List[CommenterConfig]] = None
+
+
+class ResolveUrlPayload(BaseModel):
+    url: str
 
 
 class LikeCommentRequest(BaseModel):
@@ -206,7 +219,7 @@ ATURAN GAYA BAHASA & CARA TYPING:
 2. Gunakan gaya bahasa anak muda / skena Jakarta Selatan (campuran slang, santai, kata-kata khas seperti: 'jujurly', 'which is', 'literally', 'vibesnya', 'agak laen', 'lowkey', 'valid sih', 'relate bgt', 'anjir', 'bjir', 'plis', 'cuy', 'gais', 'ygy', 'fr', dll sesuai peranmu).
 3. Cara typing: ketik santai khas netizen TikTok (kebanyakan huruf kecil/lowercase, singkatan wajar seperti 'bgt', 'gw', 'lu', 'trs', 'knp').
 4. Panjang: 1 kalimat pendek atau maksimal 2 kalimat (maksimal 20 kata).
-5. Penggunaan Emoji: BOLEH pakai 1 emoji khas anak muda/TikTok (seperti 😭, 💀, 🗿, 🙃, 🫠, ☕) JIKA COCOK, TAPI TIDAK SEMUA komentar harus ada emoji (sebagian komentar biarkan teks murni tanpa emoji agar natural).
+5. Jangan pernah gunakan emoji atau emoticon apapun (gunakan kata-kata slang dan ekspresi teks murni).
 6. Jangan gunakan tanda kutip, jangan sertakan penjelasan prolog apapun, jangan pakai hashtag.
 
 Tulis komentar TikTok sekarang:"""
@@ -225,7 +238,7 @@ Tulis komentar TikTok sekarang:"""
         return reply
     except Exception as exc:
         logger.error(f"Failed to generate AI comment: {exc}")
-        return "jujurly valid sih ini, relate bgt 😭"
+        return "jujurly valid sih ini, relate bgt"
 
 
 # Active background tasks in-memory tracker (task_id -> asyncio.Task)
@@ -367,6 +380,147 @@ async def _execute_staggered_task(
         _RUNNING_ENGAGEMENT_TASKS.pop(task_id, None)
 
 
+def _parse_doc_timestamp(doc: Dict[str, Any]) -> float:
+    """Extract comparable unix timestamp from Repliz content doc."""
+    for key in ("createdAt", "publishedAt", "updatedAt", "date", "created_at", "publishDate"):
+        val = doc.get(key)
+        if val is None or val == "":
+            continue
+        if isinstance(val, (int, float)):
+            return float(val) / 1000.0 if val > 1e11 else float(val)
+        if isinstance(val, str):
+            try:
+                val_clean = val.replace("Z", "+00:00")
+                return dt.datetime.fromisoformat(val_clean).timestamp()
+            except Exception:
+                pass
+    return 0.0
+
+
+def _extract_canonical_id_and_platform(url: str) -> tuple[str, str, str]:
+    """
+    Extract (platform, content_id, canonical_url) from video URL formats.
+    Supports TikTok, YouTube, Instagram, Repliz, or raw ID.
+    """
+    url = url.strip()
+    if not url:
+        return ("unknown", "", "")
+
+    canonical_url = url
+    if any(short in url.lower() for short in ["vt.tiktok.com", "vm.tiktok.com", "bit.ly", "tinyurl.com", "t.co"]):
+        try:
+            req = urllib.request.Request(
+                url,
+                headers={"User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)"}
+            )
+            with urllib.request.urlopen(req, timeout=5) as resp:
+                canonical_url = resp.geturl()
+        except Exception as e:
+            logger.debug(f"Could not unshorten url {url}: {e}")
+
+    # 1. TikTok
+    tt_match = re.search(r"(?:tiktok\.com\/@[^\/]+\/video\/|tiktok\.com\/v\/)(\d+)", canonical_url)
+    if tt_match:
+        return ("tiktok", tt_match.group(1), canonical_url)
+
+    # 2. YouTube
+    yt_match = re.search(r"(?:youtube\.com\/(?:watch\?v=|shorts\/|live\/)|youtu\.be\/)([a-zA-Z0-9_-]{11})", canonical_url)
+    if yt_match:
+        return ("youtube", yt_match.group(1), canonical_url)
+
+    # 3. Instagram
+    ig_match = re.search(r"instagram\.com\/(?:reel|p|tv)\/([a-zA-Z0-9_-]+)", canonical_url)
+    if ig_match:
+        return ("instagram", ig_match.group(1), canonical_url)
+
+    # 4. Repliz content id or alphanumeric ID directly entered
+    if re.match(r"^[a-zA-Z0-9_\-]+$", url):
+        return ("repliz", url, url)
+
+    return ("custom", url, canonical_url)
+
+
+def resolve_video_metadata(url: str) -> Dict[str, Any]:
+    """Resolve video metadata and ID via regex and yt-dlp."""
+    platform, content_id, canonical_url = _extract_canonical_id_and_platform(url)
+    if not content_id:
+        raise HTTPException(status_code=400, detail="URL video tidak valid atau ID video tidak ditemukan")
+
+    metadata: Dict[str, Any] = {
+        "id": content_id,
+        "contentId": content_id,
+        "platform": platform,
+        "url": canonical_url,
+        "title": f"Video {platform.capitalize()} ({content_id})",
+        "description": "",
+        "uploader": "",
+        "thumbnail": "",
+        "duration": 0,
+        "durationFormatted": "0:00",
+    }
+
+    # Attempt fast yt-dlp extraction
+    try:
+        proc = subprocess.run(
+            [
+                "yt-dlp",
+                "--dump-json",
+                "--skip-download",
+                "--no-warnings",
+                "--no-playlist",
+                "--socket-timeout", "6",
+                canonical_url,
+            ],
+            capture_output=True,
+            text=True,
+            timeout=8,
+        )
+        if proc.returncode == 0 and proc.stdout.strip():
+            raw_meta = json.loads(proc.stdout.strip().splitlines()[0])
+            title = raw_meta.get("title") or metadata["title"]
+            desc = raw_meta.get("description") or ""
+            uploader = raw_meta.get("uploader") or raw_meta.get("channel") or raw_meta.get("uploader_id") or ""
+            thumb = raw_meta.get("thumbnail") or ""
+            dur = int(raw_meta.get("duration") or 0)
+            mins = dur // 60
+            secs = dur % 60
+            dur_fmt = f"{mins}:{secs:02d}"
+
+            extracted_id = raw_meta.get("id")
+            if extracted_id and not content_id:
+                content_id = str(extracted_id)
+
+            metadata.update({
+                "id": content_id,
+                "contentId": content_id,
+                "title": title,
+                "description": desc,
+                "uploader": uploader,
+                "thumbnail": thumb,
+                "duration": dur,
+                "durationFormatted": dur_fmt,
+            })
+    except Exception as exc:
+        logger.debug(f"yt-dlp metadata extraction skipped/failed for {canonical_url}: {exc}")
+
+    return metadata
+
+
+@engagement_router.post("/resolve-url")
+async def resolve_video_url_endpoint(payload: ResolveUrlPayload, user=Depends(get_current_user)):
+    """Resolve video URL to extract canonical ID, platform, and metadata."""
+    if not payload.url or not payload.url.strip():
+        raise HTTPException(status_code=400, detail="URL video tidak boleh kosong")
+    try:
+        data = resolve_video_metadata(payload.url.strip())
+        return data
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.error(f"Failed to resolve video URL {payload.url}: {exc}")
+        raise HTTPException(status_code=400, detail=f"Gagal memproses URL video: {exc}")
+
+
 @engagement_router.get("/rules")
 async def list_engagement_rules(user=Depends(get_current_user)):
     """List all engagement automation rules."""
@@ -403,6 +557,7 @@ async def list_engagement_rules(user=Depends(get_current_user)):
             "targetAccountName": r["target_account_name"] or "",
             "targetPlatform": r["target_platform"] or "tiktok",
             "targetMode": r["target_mode"] or "latest",
+            "targetUrl": r["target_url"] if "target_url" in r.keys() and r["target_url"] else "",
             "specificContentId": specific_ids[0] if specific_ids else "",
             "specificContentIds": specific_ids,
             "isActive": bool(r["is_active"]),
@@ -431,15 +586,16 @@ async def create_engagement_rule(payload: EngagementRulePayload, user=Depends(ge
 
     cur.execute("""
         INSERT INTO social_engagement_rules (
-            name, target_account_id, target_account_name, target_platform, target_mode, specific_content_id, is_active, delay_minutes, auto_like_comments, commenters_config
+            name, target_account_id, target_account_name, target_platform, target_mode, target_url, specific_content_id, is_active, delay_minutes, auto_like_comments, commenters_config
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     """, (
         payload.name,
         payload.targetAccountId,
         payload.targetAccountName or "",
         payload.targetPlatform or "tiktok",
         payload.targetMode,
+        payload.targetUrl or "",
         specific_stored,
         1 if payload.isActive else 0,
         payload.delayMinutes,
@@ -467,7 +623,7 @@ async def update_engagement_rule(rule_id: int, payload: EngagementRulePayload, u
 
     cur.execute("""
         UPDATE social_engagement_rules
-        SET name = ?, target_account_id = ?, target_account_name = ?, target_platform = ?, target_mode = ?, specific_content_id = ?, is_active = ?, delay_minutes = ?, auto_like_comments = ?, commenters_config = ?, updated_at = CURRENT_TIMESTAMP
+        SET name = ?, target_account_id = ?, target_account_name = ?, target_platform = ?, target_mode = ?, target_url = ?, specific_content_id = ?, is_active = ?, delay_minutes = ?, auto_like_comments = ?, commenters_config = ?, updated_at = CURRENT_TIMESTAMP
         WHERE id = ?
     """, (
         payload.name,
@@ -475,6 +631,7 @@ async def update_engagement_rule(rule_id: int, payload: EngagementRulePayload, u
         payload.targetAccountName or "",
         payload.targetPlatform or "tiktok",
         payload.targetMode,
+        payload.targetUrl or "",
         specific_stored,
         1 if payload.isActive else 0,
         payload.delayMinutes,
@@ -482,6 +639,9 @@ async def update_engagement_rule(rule_id: int, payload: EngagementRulePayload, u
         commenters_json,
         rule_id
     ))
+    conn.commit()
+    conn.close()
+    return {"message": "Rule updated successfully"}
     conn.commit()
     conn.close()
     return {"message": "Rule updated successfully"}
@@ -523,10 +683,12 @@ async def list_target_account_contents(
 ):
     """Fetch recent posts of a target account from Repliz with thumbnails so user can select visually."""
     try:
-        data = await repliz_get("/public/content", params={"accountId": accountId, "limit": limit})
+        data = await repliz_get("/public/content", params={"accountId": accountId, "limit": max(limit, 25), "sortBy": "createdAt", "sortOrder": "desc"})
         docs = data.get("docs") or []
+        # Explicit descending sort by parsed timestamp to guarantee newest post first
+        docs.sort(key=_parse_doc_timestamp, reverse=True)
         items = []
-        for d in docs:
+        for d in docs[:limit]:
             medias = d.get("medias") or []
             thumbnail = ""
             if medias and isinstance(medias, list):
@@ -624,9 +786,6 @@ async def trigger_engagement(payload: TriggerEngagementRequest, user=Depends(get
     conn.close()
 
     target_acc = payload.targetAccountId or (rule["target_account_id"] if rule else None)
-    if not target_acc:
-        raise HTTPException(status_code=400, detail="Target account ID wajib diisi")
-
     target_mode = payload.targetMode or (rule["target_mode"] if rule else "latest")
     delay_minutes = payload.delayMinutes if payload.delayMinutes is not None else ((rule["delay_minutes"] if rule else 5) or 5)
 
@@ -642,12 +801,27 @@ async def trigger_engagement(payload: TriggerEngagementRequest, user=Depends(get
     if not commenters:
         raise HTTPException(status_code=400, detail="Tidak ada akun pengomentar yang dikonfigurasi")
 
+    # If target_acc is not provided (e.g. in direct URL mode), default to first commenter account
+    if not target_acc and commenters:
+        target_acc = commenters[0].get("accountId")
+    if not target_acc:
+        raise HTTPException(status_code=400, detail="Target account ID wajib diisi")
+
     # Resolve target content IDs list
     target_content_ids: List[str] = []
     if payload.contentIds:
         target_content_ids = [cid.strip() for cid in payload.contentIds if cid.strip()]
     elif payload.contentId:
         target_content_ids = [payload.contentId.strip()]
+    elif target_mode == "url":
+        url_input = payload.targetUrl or (rule["target_url"] if rule and "target_url" in rule.keys() else "") or (rule["specific_content_id"] if rule else "")
+        if url_input:
+            resolved_info = resolve_video_metadata(url_input)
+            cid = resolved_info.get("contentId") or resolved_info.get("id")
+            if cid:
+                target_content_ids = [str(cid)]
+                if not payload.metadata:
+                    payload.metadata = resolved_info
     elif rule and target_mode == "specific":
         specific_raw = rule["specific_content_id"] or ""
         if specific_raw.startswith("["):
@@ -661,10 +835,15 @@ async def trigger_engagement(payload: TriggerEngagementRequest, user=Depends(get
     # If mode is latest or no content_ids, fetch newest post from Repliz
     if target_mode == "latest" or not target_content_ids:
         try:
-            content_list = await repliz_get("/public/content", params={"accountId": target_acc, "limit": 1})
+            content_list = await repliz_get(
+                "/public/content",
+                params={"accountId": target_acc, "limit": 25, "sortBy": "createdAt", "sortOrder": "desc"}
+            )
             docs = content_list.get("docs") or []
             if not docs:
                 raise HTTPException(status_code=404, detail=f"Tidak ditemukan postingan pada akun target {target_acc}")
+            # Strict descending sort by timestamp
+            docs.sort(key=_parse_doc_timestamp, reverse=True)
             latest_doc = docs[0]
             target_content_ids = [latest_doc.get("id")]
         except HTTPException:

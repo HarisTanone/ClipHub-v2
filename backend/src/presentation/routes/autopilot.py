@@ -144,6 +144,7 @@ async def get_playlist_videos(
         playlist_id=playlist_id,
         channel_url=channel_url,
         limit=limit,
+        user_id=user.id,
     )
     return {
         "success": True,
