@@ -9,6 +9,7 @@ Enforces:
 - Rich Telegram reporting.
 """
 import os
+import re
 import json
 import logging
 import asyncio
@@ -39,6 +40,13 @@ class AutopilotService:
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     user_id INTEGER UNIQUE NOT NULL DEFAULT 1,
                     enabled INTEGER NOT NULL DEFAULT 0,
+                    source_mode TEXT NOT NULL DEFAULT 'ai',
+                    channel_url TEXT DEFAULT '',
+                    channel_title TEXT DEFAULT '',
+                    source_type TEXT DEFAULT 'channel_videos',
+                    selected_playlist_id TEXT DEFAULT '',
+                    selected_playlist_title TEXT DEFAULT '',
+                    video_selection_strategy TEXT NOT NULL DEFAULT 'latest_2',
                     niche_query TEXT NOT NULL DEFAULT 'podcast bisnis',
                     preset_slug TEXT NOT NULL DEFAULT 'default',
                     target_platforms TEXT NOT NULL DEFAULT 'tiktok,instagram,youtube',
@@ -59,12 +67,22 @@ class AutopilotService:
                 )
             """)
 
-            # Migration: ensure post_clips_count column exists
-            try:
-                conn.execute("ALTER TABLE autopilot_settings ADD COLUMN post_clips_count INTEGER NOT NULL DEFAULT 5")
-                conn.commit()
-            except Exception:
-                pass
+            # Migrations: ensure columns exist in existing databases
+            for col_name, col_def in [
+                ("post_clips_count", "INTEGER NOT NULL DEFAULT 5"),
+                ("source_mode", "TEXT NOT NULL DEFAULT 'ai'"),
+                ("channel_url", "TEXT DEFAULT ''"),
+                ("channel_title", "TEXT DEFAULT ''"),
+                ("source_type", "TEXT DEFAULT 'channel_videos'"),
+                ("selected_playlist_id", "TEXT DEFAULT ''"),
+                ("selected_playlist_title", "TEXT DEFAULT ''"),
+                ("video_selection_strategy", "TEXT NOT NULL DEFAULT 'latest_2'"),
+            ]:
+                try:
+                    conn.execute(f"ALTER TABLE autopilot_settings ADD COLUMN {col_name} {col_def}")
+                    conn.commit()
+                except Exception:
+                    pass
 
             conn.execute("""
                 CREATE TABLE IF NOT EXISTS autopilot_runs (
@@ -136,6 +154,13 @@ class AutopilotService:
                     "id": None,
                     "user_id": user_id,
                     "enabled": False,
+                    "source_mode": "ai",
+                    "channel_url": "",
+                    "channel_title": "",
+                    "source_type": "channel_videos",
+                    "selected_playlist_id": "",
+                    "selected_playlist_title": "",
+                    "video_selection_strategy": "latest_2",
                     "niche_query": "podcast bisnis",
                     "preset_slug": "default",
                     "target_platforms": "tiktok,instagram,youtube",
@@ -164,6 +189,13 @@ class AutopilotService:
                 "id": r.get("id"),
                 "user_id": r.get("user_id", user_id),
                 "enabled": bool(r.get("enabled")),
+                "source_mode": str(r.get("source_mode") or "ai"),
+                "channel_url": str(r.get("channel_url") or ""),
+                "channel_title": str(r.get("channel_title") or ""),
+                "source_type": str(r.get("source_type") or "channel_videos"),
+                "selected_playlist_id": str(r.get("selected_playlist_id") or ""),
+                "selected_playlist_title": str(r.get("selected_playlist_title") or ""),
+                "video_selection_strategy": str(r.get("video_selection_strategy") or "latest_2"),
                 "niche_query": r.get("niche_query", "podcast bisnis"),
                 "preset_slug": r.get("preset_slug", "default"),
                 "target_platforms": r.get("target_platforms", "tiktok,instagram,youtube"),
@@ -198,6 +230,14 @@ class AutopilotService:
             if exists_row:
                 curr = dict(exists_row)
                 enabled = int(data["enabled"]) if "enabled" in data else int(curr.get("enabled", 0))
+                source_mode = str(data.get("source_mode", curr.get("source_mode", "ai"))).strip() or "ai"
+                channel_url = str(data.get("channel_url", curr.get("channel_url", ""))).strip()
+                channel_title = str(data.get("channel_title", curr.get("channel_title", ""))).strip()
+                source_type = str(data.get("source_type", curr.get("source_type", "channel_videos"))).strip() or "channel_videos"
+                selected_playlist_id = str(data.get("selected_playlist_id", curr.get("selected_playlist_id", ""))).strip()
+                selected_playlist_title = str(data.get("selected_playlist_title", curr.get("selected_playlist_title", ""))).strip()
+                video_selection_strategy = str(data.get("video_selection_strategy", curr.get("video_selection_strategy", "latest_2"))).strip() or "latest_2"
+
                 niche = str(data.get("niche_query", curr.get("niche_query", "podcast bisnis"))).strip() or "podcast bisnis"
                 preset = str(data.get("preset_slug", curr.get("preset_slug", "default"))).strip() or "default"
                 platforms = str(data.get("target_platforms", curr.get("target_platforms", "tiktok,instagram,youtube"))).strip()
@@ -219,14 +259,28 @@ class AutopilotService:
                         enabled = ?, niche_query = ?, preset_slug = ?, target_platforms = ?,
                         target_account_ids = ?, schedule_mode = ?, custom_schedule_time = ?,
                         run_time = ?, min_duration_sec = ?, max_duration_sec = ?,
-                        max_daily_videos = ?, post_clips_count = ?, updated_at = ?
+                        max_daily_videos = ?, post_clips_count = ?,
+                        source_mode = ?, channel_url = ?, channel_title = ?, source_type = ?,
+                        selected_playlist_id = ?, selected_playlist_title = ?, video_selection_strategy = ?,
+                        updated_at = ?
                     WHERE user_id = ?
                 """, (
                     enabled, niche, preset, platforms, acc_ids_str, sched_mode,
-                    custom_time, run_time, min_dur, max_dur, max_daily, post_clips, now_str, user_id
+                    custom_time, run_time, min_dur, max_dur, max_daily, post_clips,
+                    source_mode, channel_url, channel_title, source_type,
+                    selected_playlist_id, selected_playlist_title, video_selection_strategy,
+                    now_str, user_id
                 ))
             else:
                 enabled = int(data.get("enabled", 0))
+                source_mode = str(data.get("source_mode", "ai")).strip() or "ai"
+                channel_url = str(data.get("channel_url", "")).strip()
+                channel_title = str(data.get("channel_title", "")).strip()
+                source_type = str(data.get("source_type", "channel_videos")).strip() or "channel_videos"
+                selected_playlist_id = str(data.get("selected_playlist_id", "")).strip()
+                selected_playlist_title = str(data.get("selected_playlist_title", "")).strip()
+                video_selection_strategy = str(data.get("video_selection_strategy", "latest_2")).strip() or "latest_2"
+
                 niche = str(data.get("niche_query", "podcast bisnis")).strip() or "podcast bisnis"
                 preset = str(data.get("preset_slug", "default")).strip() or "default"
                 platforms = str(data.get("target_platforms", "tiktok,instagram,youtube")).strip()
@@ -244,11 +298,17 @@ class AutopilotService:
                     INSERT INTO autopilot_settings (
                         user_id, enabled, niche_query, preset_slug, target_platforms,
                         target_account_ids, schedule_mode, custom_schedule_time,
-                        run_time, min_duration_sec, max_duration_sec, max_daily_videos, post_clips_count, updated_at
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        run_time, min_duration_sec, max_duration_sec, max_daily_videos, post_clips_count,
+                        source_mode, channel_url, channel_title, source_type,
+                        selected_playlist_id, selected_playlist_title, video_selection_strategy,
+                        updated_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """, (
                     user_id, enabled, niche, preset, platforms, acc_ids_str, sched_mode,
-                    custom_time, run_time, min_dur, max_dur, max_daily, post_clips, now_str
+                    custom_time, run_time, min_dur, max_dur, max_daily, post_clips,
+                    source_mode, channel_url, channel_title, source_type,
+                    selected_playlist_id, selected_playlist_title, video_selection_strategy,
+                    now_str
                 ))
 
             conn.commit()
@@ -376,6 +436,364 @@ class AutopilotService:
             logger.error(f"search_viral_videos error: {e}")
             return []
 
+    def normalize_youtube_input(self, raw: str) -> dict:
+        """Normalize user query to identify whether it's a playlist or channel handle/url."""
+        q = raw.strip()
+        # 1. Direct playlist detection
+        list_match = re.search(r'[?&]list=([a-zA-Z0-9_-]+)', q)
+        if list_match:
+            playlist_id = list_match.group(1)
+            return {
+                "type": "playlist",
+                "playlist_id": playlist_id,
+                "url": f"https://www.youtube.com/playlist?list={playlist_id}",
+                "raw": q,
+            }
+
+        # 2. Channel URL
+        if q.startswith("http://") or q.startswith("https://"):
+            clean_url = q.rstrip("/")
+            handle_match = re.search(r'@([a-zA-Z0-9_.-]+)', clean_url)
+            handle = f"@{handle_match.group(1)}" if handle_match else ""
+            return {
+                "type": "channel_url",
+                "url": clean_url,
+                "handle": handle,
+                "raw": q,
+            }
+
+        # 3. Channel handle or username
+        clean_handle = q.lstrip("@")
+        return {
+            "type": "channel_handle",
+            "handle": f"@{clean_handle}",
+            "url": f"https://www.youtube.com/@{clean_handle}",
+            "raw": q,
+        }
+
+    def inspect_channel_or_playlist(self, query: str) -> dict:
+        """Inspect a YouTube channel or playlist and return channel info, playlists, and podcasts."""
+        norm = self.normalize_youtube_input(query)
+        target_type = norm.get("type")
+
+        channel_info = {
+            "channel_title": "",
+            "channel_url": "",
+            "channel_handle": norm.get("handle") or "",
+            "is_direct_playlist": False,
+            "direct_playlist": None,
+            "playlists": [],
+            "has_channel_videos": True,
+        }
+
+        # If direct playlist
+        if target_type == "playlist":
+            pl_id = norm.get("playlist_id")
+            pl_url = norm.get("url")
+            try:
+                res = subprocess.run(
+                    [
+                        "yt-dlp",
+                        "--dump-json",
+                        "--flat-playlist",
+                        "--playlist-end", "1",
+                        "--no-warnings",
+                        "--no-update",
+                        pl_url,
+                    ],
+                    capture_output=True,
+                    text=True,
+                    timeout=15,
+                )
+                if res.returncode == 0 and res.stdout.strip():
+                    first_line = res.stdout.strip().split("\n")[0]
+                    item = json.loads(first_line)
+                    pl_title = item.get("playlist_title") or item.get("playlist") or f"Playlist {pl_id}"
+                    chan_title = item.get("playlist_channel") or item.get("playlist_uploader") or "YouTube Channel"
+                    uploader_id = item.get("playlist_uploader_id") or ""
+                    channel_info["channel_title"] = chan_title
+                    channel_info["channel_handle"] = uploader_id if uploader_id.startswith("@") else (f"@{uploader_id}" if uploader_id else "")
+                    channel_info["channel_url"] = f"https://www.youtube.com/{uploader_id}" if uploader_id else pl_url
+                    channel_info["is_direct_playlist"] = True
+                    direct_pl = {
+                        "id": pl_id,
+                        "title": pl_title,
+                        "type": "playlist",
+                        "url": pl_url,
+                        "thumbnail": item.get("thumbnails", [{}])[-1].get("url") if item.get("thumbnails") else f"https://i.ytimg.com/vi/{item.get('id', '')}/hqdefault.jpg",
+                    }
+                    channel_info["direct_playlist"] = direct_pl
+                    channel_info["playlists"].append(direct_pl)
+            except Exception as e:
+                logger.warning(f"inspect_channel_or_playlist direct playlist error: {e}")
+
+            if channel_info.get("channel_handle"):
+                norm["url"] = f"https://www.youtube.com/{channel_info['channel_handle']}"
+            else:
+                return channel_info
+
+        base_url = norm.get("url", "").rstrip("/")
+        for sub_tab in ["/videos", "/playlists", "/podcasts", "/featured"]:
+            if base_url.endswith(sub_tab):
+                base_url = base_url[:-len(sub_tab)]
+                break
+
+        channel_info["channel_url"] = base_url
+
+        collections = []
+        seen_ids = set()
+        if channel_info.get("direct_playlist"):
+            seen_ids.add(channel_info["direct_playlist"]["id"])
+
+        for tab_name, item_type in [("playlists", "playlist"), ("podcasts", "podcast")]:
+            tab_url = f"{base_url}/{tab_name}"
+            try:
+                res = subprocess.run(
+                    [
+                        "yt-dlp",
+                        "--dump-json",
+                        "--flat-playlist",
+                        "--playlist-end", "20",
+                        "--no-warnings",
+                        "--no-update",
+                        tab_url,
+                    ],
+                    capture_output=True,
+                    text=True,
+                    timeout=15,
+                )
+                if res.returncode == 0:
+                    for line in res.stdout.strip().split("\n"):
+                        if not line.strip():
+                            continue
+                        try:
+                            item = json.loads(line)
+                            item_id = item.get("id") or item.get("url")
+                            if not item_id or item_id in seen_ids:
+                                continue
+                            seen_ids.add(item_id)
+
+                            if not channel_info["channel_title"]:
+                                channel_info["channel_title"] = item.get("playlist_channel") or item.get("playlist_uploader") or ""
+                            if not channel_info["channel_handle"]:
+                                up_id = item.get("playlist_uploader_id") or ""
+                                channel_info["channel_handle"] = up_id if up_id.startswith("@") else (f"@{up_id}" if up_id else "")
+
+                            thumbs = item.get("thumbnails") or []
+                            best_thumb = thumbs[-1].get("url") if thumbs else ""
+
+                            collections.append({
+                                "id": item.get("id"),
+                                "title": item.get("title") or item.get("playlist_title") or "Untitled Collection",
+                                "type": item_type,
+                                "url": item.get("url") or f"https://www.youtube.com/playlist?list={item.get('id')}",
+                                "thumbnail": best_thumb,
+                            })
+                        except Exception:
+                            continue
+            except Exception as e:
+                logger.debug(f"Failed fetching tab {tab_name} for {base_url}: {e}")
+
+        # If channel title is still empty, fetch 1 item from /videos
+        if not channel_info["channel_title"]:
+            try:
+                res = subprocess.run(
+                    [
+                        "yt-dlp",
+                        "--dump-json",
+                        "--flat-playlist",
+                        "--playlist-end", "1",
+                        "--no-warnings",
+                        "--no-update",
+                        f"{base_url}/videos",
+                    ],
+                    capture_output=True,
+                    text=True,
+                    timeout=15,
+                )
+                if res.returncode == 0 and res.stdout.strip():
+                    first_item = json.loads(res.stdout.strip().split("\n")[0])
+                    channel_info["channel_title"] = first_item.get("playlist_channel") or first_item.get("playlist_uploader") or norm.get("handle") or "YouTube Channel"
+            except Exception:
+                pass
+
+        if not channel_info["channel_title"]:
+            channel_info["channel_title"] = norm.get("handle") or "YouTube Channel"
+
+        channel_info["playlists"].extend(collections)
+        return channel_info
+
+    def get_playlist_or_channel_videos(
+        self,
+        playlist_id: Optional[str] = None,
+        channel_url: Optional[str] = None,
+        limit: int = 25,
+    ) -> dict:
+        """Fetch videos for preview from a playlist or channel uploads."""
+        if playlist_id:
+            target_url = f"https://www.youtube.com/playlist?list={playlist_id}"
+        elif channel_url:
+            c_url = channel_url.rstrip("/")
+            target_url = c_url if c_url.endswith("/videos") else f"{c_url}/videos"
+        else:
+            return {"title": "", "target_url": "", "videos": [], "total": 0}
+
+        processed_urls = self.get_processed_urls()
+        videos = []
+        coll_title = ""
+
+        try:
+            res = subprocess.run(
+                [
+                    "yt-dlp",
+                    "--dump-json",
+                    "--flat-playlist",
+                    "--playlist-end", str(max(1, min(60, limit))),
+                    "--no-warnings",
+                    "--no-update",
+                    target_url,
+                ],
+                capture_output=True,
+                text=True,
+                timeout=20,
+            )
+            if res.returncode == 0:
+                for line in res.stdout.strip().split("\n"):
+                    if not line.strip():
+                        continue
+                    try:
+                        item = json.loads(line)
+                        vid_id = item.get("id")
+                        if not vid_id:
+                            continue
+                        if not coll_title:
+                            coll_title = item.get("playlist_title") or item.get("playlist") or ""
+
+                        title = item.get("title", "")
+                        url = item.get("url") or f"https://www.youtube.com/watch?v={vid_id}"
+                        dur = int(item.get("duration") or 0)
+                        thumbs = item.get("thumbnails") or []
+                        best_thumb = thumbs[-1].get("url") if thumbs else f"https://i.ytimg.com/vi/{vid_id}/hqdefault.jpg"
+
+                        if dur >= 3600:
+                            dur_fmt = f"{dur // 3600}:{(dur % 3600) // 60:02d}:{dur % 60:02d}"
+                        elif dur > 0:
+                            dur_fmt = f"{dur // 60}:{dur % 60:02d}"
+                        else:
+                            dur_fmt = "--:--"
+
+                        is_processed = (vid_id in processed_urls) or (url in processed_urls)
+
+                        videos.append({
+                            "id": vid_id,
+                            "title": title,
+                            "url": url,
+                            "duration_sec": dur,
+                            "duration_formatted": dur_fmt,
+                            "thumbnail": best_thumb,
+                            "is_processed": is_processed,
+                            "index": len(videos) + 1,
+                        })
+                    except Exception:
+                        continue
+        except Exception as e:
+            logger.error(f"get_playlist_or_channel_videos error for {target_url}: {e}")
+
+        return {
+            "title": coll_title,
+            "target_url": target_url,
+            "videos": videos,
+            "total": len(videos),
+        }
+
+    def _format_candidate_from_video(self, v: dict) -> dict:
+        """Format candidate dictionary for AutoCliper job submission."""
+        return {
+            "id": v["id"],
+            "title": v["title"],
+            "url": v["url"],
+            "uploader": v.get("uploader", ""),
+            "duration_sec": v.get("duration_sec", 0),
+            "views": v.get("views", 0),
+            "virality_score": 85.0,
+        }
+
+    def pick_candidate_from_channel_or_playlist(
+        self,
+        settings: dict,
+        processed_urls: set[str],
+    ) -> Optional[dict]:
+        """Pick video candidate from user-selected channel or playlist according to strategy.
+        
+        Strategies:
+        - 'latest_2' / 'second_latest_buffer': Monitor latest 2 videos in playlist/channel;
+          processes vid 2 first, then vid 1 on next day to maintain stock buffer.
+        - 'latest' / 'latest_1': Always process newest unprocessed video immediately.
+        - 'all_playlist': Process oldest unprocessed video first (sequential backlog).
+        """
+        source_type = settings.get("source_type", "channel_videos")
+        playlist_id = str(settings.get("selected_playlist_id") or "").strip()
+        channel_url = str(settings.get("channel_url") or "").strip()
+        strategy = settings.get("video_selection_strategy", "latest_2")
+        min_dur = settings.get("min_duration_sec", 480)
+        max_dur = settings.get("max_duration_sec", 3600)
+
+        # 1. Fetch playlist or channel videos
+        data = self.get_playlist_or_channel_videos(
+            playlist_id=playlist_id if source_type == "playlist" else None,
+            channel_url=channel_url if source_type != "playlist" or not playlist_id else None,
+            limit=50,
+        )
+        videos = data.get("videos") or []
+        if not videos:
+            logger.warning(
+                f"autopilot: No videos returned from source (source_type={source_type}, "
+                f"playlist_id={playlist_id}, channel_url={channel_url})"
+            )
+            return None
+
+        # 2. Filter videos by duration if duration > 0 (fallback to all if none match duration)
+        def duration_ok(v):
+            d = v.get("duration_sec", 0)
+            return d <= 0 or (min_dur <= d <= max_dur)
+
+        filtered_videos = [v for v in videos if duration_ok(v)]
+        eligible_pool = filtered_videos if filtered_videos else videos
+
+        # 3. Strategy evaluation
+        # Strategy 1: 'latest' or 'latest_1' (Selalu ambil video terbaru / vid 1)
+        if strategy in ("latest", "latest_1"):
+            window = eligible_pool[:1]
+            for v in window:
+                if v["id"] not in processed_urls and v["url"] not in processed_urls:
+                    return self._format_candidate_from_video(v)
+            return None
+
+        # Strategy 2: 'latest_2' or 'second_latest_buffer' (Buffer 2 video terakhir: vid 2 dulu, lalu vid 1)
+        elif strategy in ("latest_2", "second_latest_buffer"):
+            window = eligible_pool[:2]
+            # Check vid 2 (index 1) first if it exists and unprocessed
+            if len(window) >= 2:
+                v2 = window[1]
+                if v2["id"] not in processed_urls and v2["url"] not in processed_urls:
+                    return self._format_candidate_from_video(v2)
+            # If vid 2 already processed or only 1 video in window, check vid 1 (index 0)
+            if len(window) >= 1:
+                v1 = window[0]
+                if v1["id"] not in processed_urls and v1["url"] not in processed_urls:
+                    return self._format_candidate_from_video(v1)
+            return None
+
+        # Strategy 3: 'all_playlist' (Seluruh video di playlist secara bertahap dari terlama ke terbaru)
+        else:
+            unprocessed = [
+                v for v in eligible_pool
+                if v["id"] not in processed_urls and v["url"] not in processed_urls
+            ]
+            if unprocessed:
+                return self._format_candidate_from_video(unprocessed[-1])
+            return None
+
     def get_processed_urls(self) -> set[str]:
         """Get set of all YouTube URLs previously processed in jobs or autopilot_runs."""
         urls = set()
@@ -389,9 +807,10 @@ class AutopilotService:
                     u = str(r["youtube_url"]).strip()
                     if u:
                         urls.add(u)
-                        # also add video id if present
-                        if "v=" in u:
-                            urls.add(u.split("v=")[-1].split("&")[0])
+                        # Extract video ID if present
+                        vid_m = re.search(r'(?:v=|\/|be\/|shorts\/)([a-zA-Z0-9_-]{11})', u)
+                        if vid_m:
+                            urls.add(vid_m.group(1))
             except Exception:
                 pass
 
@@ -402,8 +821,9 @@ class AutopilotService:
                     u = str(r["youtube_url"]).strip()
                     if u:
                         urls.add(u)
-                        if "v=" in u:
-                            urls.add(u.split("v=")[-1].split("&")[0])
+                        vid_m = re.search(r'(?:v=|\/|be\/|shorts\/)([a-zA-Z0-9_-]{11})', u)
+                        if vid_m:
+                            urls.add(vid_m.group(1))
             except Exception:
                 pass
 
@@ -412,17 +832,19 @@ class AutopilotService:
             conn.close()
 
     def pick_best_candidate(self, user_id: int = 1) -> Optional[dict]:
-        """Search and pick the #1 best viral candidate matching niche & duration that hasn't been clipped.
-
-        Progressive query variants: when a batch is exhausted (all processed/out of
-        duration range), widen the pool with recency/length modifiers before giving up.
-        """
+        """Search and pick the #1 best viral candidate matching settings that hasn't been clipped."""
         settings = self.get_settings(user_id)
+        source_mode = settings.get("source_mode", "ai")
+        processed_urls = self.get_processed_urls()
+
+        # If user configured channel / playlist source mode
+        if source_mode == "channel_playlist":
+            return self.pick_candidate_from_channel_or_playlist(settings, processed_urls)
+
+        # AI Discovery mode
         niche = settings.get("niche_query", "podcast bisnis")
         min_dur = settings.get("min_duration_sec", 480)
         max_dur = settings.get("max_duration_sec", 3600)
-
-        processed_urls = self.get_processed_urls()
 
         attempts = [
             (niche, 10),
@@ -535,18 +957,27 @@ class AutopilotService:
                 # 3. Pick candidate video
                 candidate = self.pick_best_candidate(user_id)
                 if not candidate:
+                    source_mode = settings.get("source_mode", "ai")
+                    if source_mode == "channel_playlist":
+                        src_name = settings.get("selected_playlist_title") or settings.get("channel_title") or settings.get("channel_url") or "playlist / channel"
+                        strat = settings.get("video_selection_strategy", "latest_2")
+                        strat_desc = "2 video terakhir" if strat == "latest_2" else ("video terbaru" if strat in ("latest", "latest_1") else "playlist")
+                        err_msg = f"Semua video ({strat_desc}) pada '{src_name}' sudah diproses atau belum ada video baru yang dirilis."
+                    else:
+                        err_msg = f"Tidak ditemukan video baru yang belum pernah diproses untuk topik '{settings.get('niche_query')}'."
+
                     if reservation_id:
                         conn = get_dict_connection()
                         try:
-                            conn.execute("UPDATE autopilot_runs SET status='failed', video_title='Tidak ditemukan video baru' WHERE id=?", (reservation_id,))
+                            conn.execute("UPDATE autopilot_runs SET status='failed', video_title=? WHERE id=?", (err_msg[:200], reservation_id))
                             conn.commit()
                         finally:
                             conn.close()
-                    logger.warning(f"autopilot: No fresh candidate video found for niche '{settings.get('niche_query')}'.")
+                    logger.warning(f"autopilot: {err_msg}")
                     return {
                         "success": False,
                         "status": "no_candidate_found",
-                        "message": f"Tidak ditemukan video baru yang belum pernah diproses untuk topik '{settings.get('niche_query')}'.",
+                        "message": err_msg,
                     }
 
                 video_url = candidate["url"]
@@ -699,9 +1130,18 @@ class AutopilotService:
                     try:
                         from src.infrastructure.telegram_notifier import send_telegram_broadcast
                         sched_desc = "Optimal AI Posting" if schedule_mode == "ai" else f"Mulai {custom_schedule_time or '09:00'}"
+                        source_mode = settings.get("source_mode", "ai")
+                        if source_mode == "channel_playlist":
+                            strat = settings.get("video_selection_strategy", "latest_2")
+                            strat_label = "Buffer 2 Video Terakhir" if strat == "latest_2" else ("Video Terbaru" if strat in ("latest", "latest_1") else "Seluruh Playlist")
+                            src_info = f"<b>Sumber:</b> {settings.get('selected_playlist_title') or settings.get('channel_title') or 'Channel/Playlist'} ({strat_label})\n"
+                        else:
+                            src_info = f"<b>Niche AI:</b> {settings.get('niche_query', 'podcast bisnis')}\n"
+
                         caption_text = (
                             f"<b>[AUTOPILOT] Hermes Autopilot — Job Hari Ini Dijalankan!</b>\n\n"
                             f"<b>User ID:</b> {user_id}\n"
+                            f"{src_info}"
                             f"<b>Judul:</b> {video_title}\n"
                             f"<b>Virality Score:</b> {virality_score}/100\n"
                             f"<b>Preset:</b> {preset_slug}\n"

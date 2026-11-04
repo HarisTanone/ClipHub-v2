@@ -424,6 +424,149 @@ async def test_concurrent_autopilot_triggers_blocked_by_lock_and_reservation():
         assert failures[0].get("status") == "quota_exceeded"
 
 
+def test_channel_playlist_settings_crud():
+    """Test saving and retrieving channel/playlist specific autopilot settings."""
+    service = AutopilotService()
+    user_id = 99
+
+    updated = service.update_settings(user_id=user_id, data={
+        "source_mode": "channel_playlist",
+        "channel_url": "https://www.youtube.com/@tempovideochannel",
+        "channel_title": "Tempodotco",
+        "source_type": "playlist",
+        "selected_playlist_id": "PLkiSnq8pdz9T3QQVbczz4XVgsHjjJK3vd",
+        "selected_playlist_title": "Bocor Alus Politik",
+        "video_selection_strategy": "latest_2",
+    })
+
+    assert updated["source_mode"] == "channel_playlist"
+    assert updated["channel_url"] == "https://www.youtube.com/@tempovideochannel"
+    assert updated["channel_title"] == "Tempodotco"
+    assert updated["source_type"] == "playlist"
+    assert updated["selected_playlist_id"] == "PLkiSnq8pdz9T3QQVbczz4XVgsHjjJK3vd"
+    assert updated["selected_playlist_title"] == "Bocor Alus Politik"
+    assert updated["video_selection_strategy"] == "latest_2"
+
+    fetched = service.get_settings(user_id=user_id)
+    assert fetched["source_mode"] == "channel_playlist"
+    assert fetched["selected_playlist_id"] == "PLkiSnq8pdz9T3QQVbczz4XVgsHjjJK3vd"
+    assert fetched["selected_playlist_title"] == "Bocor Alus Politik"
+    assert fetched["video_selection_strategy"] == "latest_2"
+
+
+def test_normalize_youtube_input():
+    """Test URL and handle normalization for channels and playlists."""
+    service = AutopilotService()
+
+    # Raw username handle
+    r1 = service.normalize_youtube_input("tempovideochannel")
+    assert r1["type"] == "channel_handle"
+    assert r1["handle"] == "@tempovideochannel"
+    assert r1["url"] == "https://www.youtube.com/@tempovideochannel"
+
+    # Handle with @
+    r2 = service.normalize_youtube_input("@tempovideochannel")
+    assert r2["type"] == "channel_handle"
+    assert r2["handle"] == "@tempovideochannel"
+
+    # Full channel URL
+    r3 = service.normalize_youtube_input("https://www.youtube.com/@tempovideochannel/playlists")
+    assert r3["type"] == "channel_url"
+    assert r3["handle"] == "@tempovideochannel"
+
+    # Direct playlist URL
+    r4 = service.normalize_youtube_input("https://www.youtube.com/playlist?list=PLkiSnq8pdz9T3QQVbczz4XVgsHjjJK3vd")
+    assert r4["type"] == "playlist"
+    assert r4["playlist_id"] == "PLkiSnq8pdz9T3QQVbczz4XVgsHjjJK3vd"
+
+    # Watch URL with list param
+    r5 = service.normalize_youtube_input("https://www.youtube.com/watch?v=xEWpw4UEN0o&list=PLkiSnq8pdz9T3QQVbczz4XVgsHjjJK3vd")
+    assert r5["type"] == "playlist"
+    assert r5["playlist_id"] == "PLkiSnq8pdz9T3QQVbczz4XVgsHjjJK3vd"
+
+
+def test_channel_playlist_candidate_selection_latest_2():
+    """Test buffer 2 video strategy (processes vid 2 on day 1, then vid 1 on day 2)."""
+    service = AutopilotService()
+    user_id = 99
+    service.update_settings(user_id=user_id, data={
+        "source_mode": "channel_playlist",
+        "source_type": "playlist",
+        "selected_playlist_id": "PL_sample_01",
+        "video_selection_strategy": "latest_2",
+        "min_duration_sec": 300,
+        "max_duration_sec": 3600,
+    })
+
+    # Mock playlist of 10 videos (index 0 is vid1/newest, index 1 is vid2, ...)
+    mock_videos = [
+        {"id": f"vid{i}", "title": f"Video Title {i}", "url": f"https://www.youtube.com/watch?v=vid{i}", "duration_sec": 1200}
+        for i in range(1, 11)
+    ]
+
+    # Day 1: Clean state -> should select vid2 (index 1) to build buffer
+    with patch.object(service, "get_playlist_or_channel_videos", return_value={"videos": mock_videos, "title": "Mock Show"}), \
+         patch.object(service, "get_processed_urls", return_value=set()):
+        c1 = service.pick_best_candidate(user_id=user_id)
+        assert c1 is not None
+        assert c1["id"] == "vid2"
+
+    # Day 2: vid2 was processed yesterday -> should now select vid1
+    with patch.object(service, "get_playlist_or_channel_videos", return_value={"videos": mock_videos, "title": "Mock Show"}), \
+         patch.object(service, "get_processed_urls", return_value={"vid2", "https://www.youtube.com/watch?v=vid2"}):
+        c2 = service.pick_best_candidate(user_id=user_id)
+        assert c2 is not None
+        assert c2["id"] == "vid1"
+
+    # Day 3: vid1 and vid2 both processed, no new uploads -> returns None (waits for fresh upload)
+    with patch.object(service, "get_playlist_or_channel_videos", return_value={"videos": mock_videos, "title": "Mock Show"}), \
+         patch.object(service, "get_processed_urls", return_value={"vid1", "vid2"}):
+        c3 = service.pick_best_candidate(user_id=user_id)
+        assert c3 is None
+
+    # Day 4: Channel uploads vid0! Newest videos are now [vid0, vid1, vid2, ...]
+    mock_videos_updated = [
+        {"id": "vid0", "title": "Video 0 (Fresh)", "url": "https://www.youtube.com/watch?v=vid0", "duration_sec": 1200}
+    ] + mock_videos
+
+    with patch.object(service, "get_playlist_or_channel_videos", return_value={"videos": mock_videos_updated, "title": "Mock Show"}), \
+         patch.object(service, "get_processed_urls", return_value={"vid1", "vid2"}):
+        c4 = service.pick_best_candidate(user_id=user_id)
+        assert c4 is not None
+        assert c4["id"] == "vid0"
+
+
+def test_channel_playlist_candidate_selection_latest_1():
+    """Test always take latest video strategy (vid1 directly)."""
+    service = AutopilotService()
+    user_id = 99
+    service.update_settings(user_id=user_id, data={
+        "source_mode": "channel_playlist",
+        "source_type": "playlist",
+        "selected_playlist_id": "PL_sample_01",
+        "video_selection_strategy": "latest_1",
+    })
+
+    mock_videos = [
+        {"id": f"vid{i}", "title": f"Video Title {i}", "url": f"https://www.youtube.com/watch?v=vid{i}", "duration_sec": 1200}
+        for i in range(1, 11)
+    ]
+
+    # Day 1: directly selects vid1
+    with patch.object(service, "get_playlist_or_channel_videos", return_value={"videos": mock_videos, "title": "Mock Show"}), \
+         patch.object(service, "get_processed_urls", return_value=set()):
+        c1 = service.pick_best_candidate(user_id=user_id)
+        assert c1 is not None
+        assert c1["id"] == "vid1"
+
+    # Day 2: vid1 is processed -> returns None (waits for fresh release)
+    with patch.object(service, "get_playlist_or_channel_videos", return_value={"videos": mock_videos, "title": "Mock Show"}), \
+         patch.object(service, "get_processed_urls", return_value={"vid1"}):
+        c2 = service.pick_best_candidate(user_id=user_id)
+        assert c2 is None
+
+
+
 
 
 

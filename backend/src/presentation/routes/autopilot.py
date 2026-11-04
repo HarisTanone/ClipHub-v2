@@ -14,6 +14,13 @@ router = APIRouter(prefix="/autopilot", tags=["Autopilot"])
 
 class UpdateAutopilotSettingsRequest(BaseModel):
     enabled: Optional[bool] = None
+    source_mode: Optional[str] = Field(None, description="Mode sumber video: 'ai' (AI Viral Search) atau 'channel_playlist' (Channel / Playlist Pilihan)")
+    channel_url: Optional[str] = Field(None, description="Username handle atau URL Channel YouTube")
+    channel_title: Optional[str] = Field(None, description="Nama Channel YouTube")
+    source_type: Optional[str] = Field(None, description="Tipe sumber: 'channel_videos' atau 'playlist'")
+    selected_playlist_id: Optional[str] = Field(None, description="ID Playlist yang dipilih")
+    selected_playlist_title: Optional[str] = Field(None, description="Judul Playlist yang dipilih")
+    video_selection_strategy: Optional[str] = Field(None, description="Strategi pemilihan video: 'latest_2' (buffer 2 video), 'latest_1' (video terbaru langsung), 'all_playlist'")
     niche_query: Optional[str] = Field(None, description="Topik atau kata kunci pencarian video viral")
     preset_slug: Optional[str] = Field(None, description="Preset style slug untuk rendering klip")
     target_platforms: Optional[str] = Field(None, description="Comma-separated platform target (tiktok,instagram,youtube)")
@@ -103,4 +110,42 @@ async def get_autopilot_history(
     return {
         "success": True,
         "data": history,
+    }
+
+
+@router.get("/inspect-channel")
+async def inspect_channel(
+    query: str,
+    user: CurrentUser = Depends(get_current_user),
+):
+    """Inspect YouTube channel or playlist and return channel details and available playlists/shows/podcasts."""
+    if not query or not query.strip():
+        raise HTTPException(status_code=400, detail="Query channel atau playlist tidak boleh kosong")
+
+    result = autopilot_service.inspect_channel_or_playlist(query.strip())
+    return {
+        "success": True,
+        "data": result,
+    }
+
+
+@router.get("/playlist-videos")
+async def get_playlist_videos(
+    playlist_id: Optional[str] = None,
+    channel_url: Optional[str] = None,
+    limit: int = 25,
+    user: CurrentUser = Depends(get_current_user),
+):
+    """Fetch video preview list from a specific playlist or channel uploads."""
+    if not playlist_id and not channel_url:
+        raise HTTPException(status_code=400, detail="Harap sediakan playlist_id atau channel_url")
+
+    result = autopilot_service.get_playlist_or_channel_videos(
+        playlist_id=playlist_id,
+        channel_url=channel_url,
+        limit=limit,
+    )
+    return {
+        "success": True,
+        "data": result,
     }

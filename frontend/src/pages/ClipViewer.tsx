@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from "react";
 import { Link, useParams } from "react-router-dom";
-import { ArrowLeft, Play, Type, Layers, Edit3, Download, Save, X, Palette, Eye, Wand2, ChevronLeft, ChevronRight, Upload, CheckCircle2, AlertCircle, RefreshCw, Send, Shield, Copy, Check, Heart, MessageSquare, Share2, Music } from "lucide-react";
+import { ArrowLeft, Play, Type, Layers, Edit3, Download, Save, X, Palette, Eye, Wand2, ChevronLeft, ChevronRight, Upload, CheckCircle2, AlertCircle, RefreshCw, Send, Shield, Copy, Check, Heart, MessageSquare, Share2, Music, FileText } from "lucide-react";
 import { Card, CardHeader, CardTitle } from "@/components/ui/Card";
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
@@ -10,6 +10,7 @@ import { SkeletonCard } from "@/components/ui/Skeleton";
 import { useToast } from "@/components/ui/Toast";
 import { useAuth } from "@/hooks/useAuth";
 import { VideoPreviewOverlay } from "@/components/VideoPreviewOverlay";
+import { Modal } from "@/components/ui/Modal";
 import { ScheduleModal } from "@/components/ScheduleModal";
 import { StyleEditorModal, DEFAULT_HOOK_STYLE, DEFAULT_SUBTITLE_STYLE, DEFAULT_TEXT_EMPHASIS_STYLE, DEFAULT_WATERMARK_STYLE, DEFAULT_CTA_STYLE, normaliseTextEmphasisStyle, normaliseCtaStyle, type HookStyle, type SubtitleStyle, type TextEmphasisStyle, type WatermarkStyle, type CtaStyle } from "@/components/StyleEditorModal";
 import { jobs, API_BASE, getToken, type ClipDetailResponse } from "@/lib/api";
@@ -85,6 +86,11 @@ export function ClipViewer() {
   const [showSafeZone, setShowSafeZone] = useState(false);
   const [playbackSpeed, setPlaybackSpeed] = useState<number>(1);
   const [copiedFull, setCopiedFull] = useState(false);
+
+  // Whisper transcript modal & copy states
+  const [transcriptModalOpen, setTranscriptModalOpen] = useState(false);
+  const [copiedTranscriptJson, setCopiedTranscriptJson] = useState(false);
+  const [copiedTranscriptText, setCopiedTranscriptText] = useState(false);
 
   // Other clips from same job
   const [otherClips, setOtherClips] = useState<any[]>([]);
@@ -289,6 +295,59 @@ export function ClipViewer() {
     finally { setIsRestyling(false); setRestyleProgress(null); }
   }
 
+  const transcriptPayload = clip ? {
+    job_id: jobId,
+    clip_rank: clipRank,
+    start: clip.start,
+    end: clip.end,
+    duration: clip.duration,
+    hook: clip.hook,
+    full_text: (clip.words || []).map((w) => w.word).join(" ").trim(),
+    word_count: clip.words?.length || 0,
+    words: clip.words || [],
+  } : null;
+
+  const handleCopyTranscriptJson = () => {
+    if (!transcriptPayload) return;
+    navigator.clipboard?.writeText(JSON.stringify(transcriptPayload, null, 2))
+      .then(() => {
+        setCopiedTranscriptJson(true);
+        toast.success("Transkrip JSON berhasil disalin!");
+        setTimeout(() => setCopiedTranscriptJson(false), 2000);
+      })
+      .catch(() => {
+        toast.error("Gagal menyalin transkrip JSON");
+      });
+  };
+
+  const handleCopyTranscriptText = () => {
+    if (!transcriptPayload?.full_text) return;
+    navigator.clipboard?.writeText(transcriptPayload.full_text)
+      .then(() => {
+        setCopiedTranscriptText(true);
+        toast.success("Teks transkrip berhasil disalin!");
+        setTimeout(() => setCopiedTranscriptText(false), 2000);
+      })
+      .catch(() => {
+        toast.error("Gagal menyalin teks transkrip");
+      });
+  };
+
+  const handleDownloadTranscriptJson = () => {
+    if (!transcriptPayload) return;
+    const jsonStr = JSON.stringify(transcriptPayload, null, 2);
+    const blob = new Blob([jsonStr], { type: "application/json;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `transcript_${jobId}_clip_${clipRank}.json`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+    toast.success("File transkrip JSON berhasil diunduh");
+  };
+
   if (isLoading && !clip) {
     return <div className="space-y-3"><SkeletonCard /><SkeletonCard /></div>;
   }
@@ -475,6 +534,14 @@ export function ClipViewer() {
 
             {/* Action Buttons */}
             <div className="flex items-center gap-1.5 flex-wrap justify-end sm:ml-auto">
+              <Button
+                variant="outline"
+                size="xs"
+                onClick={() => setTranscriptModalOpen(true)}
+                icon={<FileText className="h-3 w-3" />}
+              >
+                Transkrip JSON
+              </Button>
               {rawUrl && <a href={rawUrl} download><Button variant="outline" size="xs" icon={<Download className="h-3 w-3" />}>Raw</Button></a>}
               {finalDownloadUrl && <a href={finalDownloadUrl} download><Button variant="primary" size="xs" icon={<Download className="h-3 w-3" />}>Final</Button></a>}
               {finalDownloadUrl && (
@@ -649,7 +716,18 @@ export function ClipViewer() {
           {/* Words */}
           {clip.words && clip.words.length > 0 && (
             <Card className="p-3">
-              <h3 className="text-xs font-semibold text-zinc-300 mb-2">Transcript ({clip.words.length} words)</h3>
+              <div className="flex items-center justify-between mb-2">
+                <h3 className="text-xs font-semibold text-zinc-300">Transcript ({clip.words.length} words)</h3>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="xs"
+                  onClick={() => setTranscriptModalOpen(true)}
+                  icon={<FileText className="h-3 w-3" />}
+                >
+                  Lihat JSON
+                </Button>
+              </div>
               <div className="flex flex-wrap gap-0.5 max-h-32 overflow-y-auto">
                 {clip.words.map((w, i) => (
                   <span key={i} className={cn("text-[10px] px-1 py-0.5 rounded",
@@ -859,6 +937,99 @@ export function ClipViewer() {
         defaultCaption={clip.captions?.tiktok || clip.captions?.instagram || clip.captions?.youtube || clip.hook || ""}
         hookText={clip.hook || ""}
       />
+
+      {/* Whisper Transcript Modal */}
+      {clip && (
+        <Modal
+          open={transcriptModalOpen}
+          onClose={() => setTranscriptModalOpen(false)}
+          title={`Transkrip Whisper JSON — Clip #${clipRank}`}
+          size="lg"
+        >
+          <div className="space-y-4">
+            {/* Summary Chips */}
+            <div className="flex flex-wrap items-center gap-2 text-[11px] text-zinc-400">
+              <span className="rounded-md border border-zinc-800 bg-zinc-900/80 px-2 py-0.5 font-mono text-zinc-300">
+                Clip #{clipRank}
+              </span>
+              <span className="rounded-md border border-zinc-800 bg-zinc-900/80 px-2 py-0.5 font-mono text-zinc-300">
+                {clip.words?.length || 0} kata
+              </span>
+              <span className="rounded-md border border-zinc-800 bg-zinc-900/80 px-2 py-0.5 font-mono text-zinc-300">
+                {clip.start?.toFixed(1)}s → {clip.end?.toFixed(1)}s ({formatDuration(clip.duration)})
+              </span>
+              {clip.hook && (
+                <span className="rounded-md border border-zinc-800 bg-zinc-900/80 px-2 py-0.5 text-zinc-400 max-w-xs truncate" title={clip.hook}>
+                  Hook: {clip.hook}
+                </span>
+              )}
+            </div>
+
+            {/* Full text preview */}
+            {transcriptPayload?.full_text && (
+              <div className="rounded-lg border border-zinc-800 bg-zinc-950/70 p-3">
+                <div className="flex items-center justify-between mb-1.5">
+                  <span className="text-[11px] font-medium text-zinc-400">Teks Transkrip Lengkap</span>
+                  <button
+                    type="button"
+                    onClick={handleCopyTranscriptText}
+                    className="inline-flex items-center gap-1 rounded bg-zinc-800/60 border border-zinc-700/50 px-2 py-0.5 text-[10px] text-zinc-300 hover:text-white hover:bg-zinc-800 transition-colors"
+                  >
+                    {copiedTranscriptText ? <Check className="h-3 w-3 text-emerald-400" /> : <Copy className="h-3 w-3" />}
+                    <span>{copiedTranscriptText ? "Tersalin" : "Salin Teks"}</span>
+                  </button>
+                </div>
+                <p className="text-xs text-zinc-300 leading-relaxed font-sans max-h-24 overflow-y-auto select-all">
+                  {transcriptPayload.full_text}
+                </p>
+              </div>
+            )}
+
+            {/* Formatted JSON Viewer */}
+            <div className="rounded-lg border border-zinc-800 bg-zinc-950">
+              <div className="flex items-center justify-between border-b border-zinc-800/80 px-3 py-1.5 text-[11px] text-zinc-400">
+                <div className="flex items-center gap-1.5">
+                  <FileText className="h-3.5 w-3.5 text-violet-400" />
+                  <span className="font-mono text-[10px] text-zinc-400">transcript_{jobId}_clip_{clipRank}.json</span>
+                </div>
+                <span className="text-[10px] text-zinc-500 font-mono">{clip.words?.length || 0} timestamps</span>
+              </div>
+              <pre className="max-h-80 overflow-y-auto overflow-x-auto p-3 text-[11px] font-mono text-zinc-300 leading-relaxed select-all">
+                {JSON.stringify(transcriptPayload, null, 2)}
+              </pre>
+            </div>
+
+            {/* Footer Actions */}
+            <div className="flex flex-wrap items-center justify-between gap-2 border-t border-zinc-800/80 pt-3">
+              <div className="flex items-center gap-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={handleCopyTranscriptJson}
+                  icon={copiedTranscriptJson ? <Check className="h-3.5 w-3.5 text-emerald-400" /> : <Copy className="h-3.5 w-3.5" />}
+                >
+                  {copiedTranscriptJson ? "Tersalin!" : "Salin JSON"}
+                </Button>
+                <Button
+                  variant="primary"
+                  size="sm"
+                  onClick={handleDownloadTranscriptJson}
+                  icon={<Download className="h-3.5 w-3.5" />}
+                >
+                  Unduh JSON
+                </Button>
+              </div>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => setTranscriptModalOpen(false)}
+              >
+                Tutup
+              </Button>
+            </div>
+          </div>
+        </Modal>
+      )}
     </div>
   );
 }

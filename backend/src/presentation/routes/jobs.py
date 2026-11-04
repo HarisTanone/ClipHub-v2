@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Union
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile
-from fastapi.responses import FileResponse, StreamingResponse
+from fastapi.responses import FileResponse, Response, StreamingResponse
 
 from src.application.services import JobService
 from src.config import settings
@@ -1526,9 +1526,89 @@ async def get_clip_detail(
                 "raw": f"/api/jobs/{job_id}/clips/{clip_rank}/raw" if file_status["raw"] else None,
                 "final": f"/api/jobs/{job_id}/clips/{clip_rank}/final" if file_status["final"] else None,
                 "thumbnail": f"/api/jobs/{job_id}/clips/{clip_rank}/thumb" if file_status["thumbnail"] else None,
+                "transcript": f"/api/jobs/{job_id}/clips/{clip_rank}/transcript",
             },
         },
     }
+
+
+@router.get("/{job_id}/clips/{clip_rank}/transcript")
+async def get_clip_transcript(
+    job_id: str,
+    clip_rank: int,
+    download: bool = False,
+    service: JobService = Depends(get_job_service),
+):
+    """Get Whisper transcript for a specific clip with word-level timestamps.
+
+    Supports direct JSON response or attachment download when download=True.
+    """
+    job = await service.get_job(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+
+    clip_data = None
+    if job.clips_data and "clips" in job.clips_data:
+        for clip in job.clips_data["clips"]:
+            if clip.get("rank") == clip_rank:
+                clip_data = clip
+                break
+
+    if clip_data is None:
+        raise HTTPException(status_code=404, detail=f"Clip #{clip_rank} not found")
+
+    words = clip_data.get("words") or []
+    if not words:
+        output_dir = f"{settings.OUTPUT_DIR}/{job_id}"
+        for path in [
+            os.path.join(output_dir, "json_analisa", f"clip_{clip_rank}.json"),
+            os.path.join(output_dir, "json_analisa", f"clip_{clip_rank:02d}.json"),
+        ]:
+            if os.path.exists(path):
+                try:
+                    with open(path, encoding="utf-8") as f:
+                        disk_data = json.load(f)
+                    words = disk_data.get("words") or []
+                    if words:
+                        break
+                except Exception:
+                    pass
+
+    full_text = " ".join(
+        str(w.get("word", "")).strip() for w in words if isinstance(w, dict) and w.get("word")
+    ).strip()
+
+    start_sec = clip_data.get("start")
+    end_sec = clip_data.get("end")
+    duration_sec = (
+        round(float(end_sec) - float(start_sec), 2)
+        if (start_sec is not None and end_sec is not None)
+        else round(float(clip_data.get("duration", 0)), 2)
+    )
+
+    transcript_payload = {
+        "job_id": job_id,
+        "clip_rank": clip_rank,
+        "video_title": job.video_title or "",
+        "start": start_sec,
+        "end": end_sec,
+        "duration": duration_sec,
+        "hook": clip_data.get("hook") or "",
+        "full_text": full_text,
+        "word_count": len(words),
+        "words": words,
+    }
+
+    if download:
+        content = json.dumps(transcript_payload, ensure_ascii=False, indent=2)
+        filename = f"transcript_{job_id}_clip_{clip_rank}.json"
+        return Response(
+            content=content,
+            media_type="application/json; charset=utf-8",
+            headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+        )
+
+    return {"success": True, "data": transcript_payload}
 
 
 # ─── Phase 6: Clip-Level Hook & Style Editing + Re-render ─────────────────────

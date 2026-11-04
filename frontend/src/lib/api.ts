@@ -786,6 +786,15 @@ export const jobs = {
     return `${API_BASE}/api/jobs/${jobId}/clips/${rank}/thumb`;
   },
 
+  getClipTranscriptUrl(jobId: string, rank: number, download: boolean = true): string {
+    const d = download ? "?download=true" : "";
+    return `${API_BASE}/api/jobs/${jobId}/clips/${rank}/transcript${d}`;
+  },
+
+  async getClipTranscript(jobId: string, rank: number): Promise<{ success: boolean; data: any }> {
+    return request(`/api/jobs/${jobId}/clips/${rank}/transcript`);
+  },
+
   async getSourceThumbBlob(jobId: string): Promise<Blob> {
     return requestBlob(`/api/jobs/${jobId}/source-thumb`);
   },
@@ -1394,10 +1403,53 @@ export const youtubeCookies = {
 
 // ─── Autopilot API ────────────────────────────────────────────────────────────
 
+export interface AutopilotPlaylistItem {
+  id: string;
+  title: string;
+  type: "playlist" | "podcast";
+  url: string;
+  thumbnail: string;
+}
+
+export interface AutopilotChannelInspectResult {
+  channel_title: string;
+  channel_url: string;
+  channel_handle: string;
+  is_direct_playlist: boolean;
+  direct_playlist?: AutopilotPlaylistItem | null;
+  playlists: AutopilotPlaylistItem[];
+  has_channel_videos: boolean;
+}
+
+export interface AutopilotVideoItem {
+  id: string;
+  title: string;
+  url: string;
+  duration_sec: number;
+  duration_formatted: string;
+  thumbnail: string;
+  is_processed: boolean;
+  index: number;
+}
+
+export interface AutopilotPlaylistVideosResult {
+  title: string;
+  target_url: string;
+  videos: AutopilotVideoItem[];
+  total: number;
+}
+
 export interface AutopilotSettings {
   id?: number;
   user_id?: number;
   enabled: boolean;
+  source_mode?: "ai" | "channel_playlist";
+  channel_url?: string;
+  channel_title?: string;
+  source_type?: "channel_videos" | "playlist";
+  selected_playlist_id?: string;
+  selected_playlist_title?: string;
+  video_selection_strategy?: "latest_2" | "latest_1" | "latest" | "all_playlist";
   niche_query: string;
   preset_slug: string;
   target_platforms: string;
@@ -1440,6 +1492,24 @@ export const autopilotApi = {
       method: "POST",
       body: JSON.stringify(data),
     });
+  },
+  async inspectChannel(query: string): Promise<{ success: boolean; data: AutopilotChannelInspectResult }> {
+    return request<{ success: boolean; data: AutopilotChannelInspectResult }>(
+      `/api/autopilot/inspect-channel?query=${encodeURIComponent(query)}`
+    );
+  },
+  async getPlaylistVideos(params: {
+    playlist_id?: string;
+    channel_url?: string;
+    limit?: number;
+  }): Promise<{ success: boolean; data: AutopilotPlaylistVideosResult }> {
+    const q = new URLSearchParams();
+    if (params.playlist_id) q.set("playlist_id", params.playlist_id);
+    if (params.channel_url) q.set("channel_url", params.channel_url);
+    if (params.limit) q.set("limit", String(params.limit));
+    return request<{ success: boolean; data: AutopilotPlaylistVideosResult }>(
+      `/api/autopilot/playlist-videos?${q.toString()}`
+    );
   },
   async triggerRun(force: boolean = false): Promise<{
     success: boolean;
