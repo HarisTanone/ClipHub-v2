@@ -27,11 +27,18 @@ class MinioService:
             secret_key = getattr(settings, "MINIO_SECRET_KEY", "")
             secure = getattr(settings, "MINIO_SECURE", False)
 
+            import urllib3
+            http_client = urllib3.PoolManager(
+                timeout=urllib3.Timeout(connect=5.0, read=30.0),
+                retries=urllib3.Retry(total=2, backoff_factor=0.2),
+            )
+
             self._client = Minio(
                 endpoint,
                 access_key=access_key,
                 secret_key=secret_key,
                 secure=secure,
+                http_client=http_client,
             )
 
             # Ensure bucket exists
@@ -41,6 +48,8 @@ class MinioService:
                     logger.info(f"[minio] Created bucket: {self._bucket}")
             except S3Error as e:
                 logger.warning(f"[minio] Bucket check failed: {e}")
+            except Exception as e:
+                logger.warning(f"[minio] Bucket connection check failed: {e}")
 
         return self._client
 
@@ -161,14 +170,31 @@ class MinioService:
         """Delete ALL objects in the bucket (e.g. 'cliperhub'). Returns count deleted."""
         deleted = 0
         try:
+            if not self.client.bucket_exists(self._bucket):
+                logger.info(f"[minio] Bucket {self._bucket} does not exist.")
+                return 0
+
+            from minio.deleteobjects import DeleteObject
+
             objects = list(self.client.list_objects(self._bucket, recursive=True))
-            for obj in objects:
-                if obj.object_name:
-                    self.client.remove_object(self._bucket, obj.object_name)
-                    deleted += 1
-            logger.info(f"[minio] Cleared {deleted} objects from bucket {self._bucket}")
+            if not objects:
+                logger.info(f"[minio] Bucket {self._bucket} is already empty.")
+                return 0
+
+            delete_list = [DeleteObject(obj.object_name) for obj in objects if obj.object_name]
+            errors = list(self.client.remove_objects(self._bucket, delete_list))
+            error_names = {err.object_name for err in errors}
+            deleted = len(delete_list) - len(error_names)
+            if errors:
+                for err in errors[:5]:
+                    logger.warning(f"[minio] Delete object error for {err.object_name}: {err}")
+            logger.info(f"[minio] Cleared {deleted} objects from bucket {self._bucket} (errors: {len(errors)})")
         except S3Error as e:
+            logger.warning(f"[minio] Bucket clear S3 error: {e}")
+            raise
+        except Exception as e:
             logger.warning(f"[minio] Bucket clear failed: {e}")
+            raise
         return deleted
 
 

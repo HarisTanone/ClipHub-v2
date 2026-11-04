@@ -833,17 +833,17 @@ export function Settings() {
 
   async function handleClearStorage() {
     if (!(await confirmDialog({
-      title: "Clear all storage & processing data?",
-      message: "This will delete ALL clipping jobs, video generator assets, output videos, downloaded footages, thumbnails, analysis caches, and all objects in the configured storage bucket.\n\nPresets, user accounts, and system settings will be preserved.\n\nThis action cannot be undone.",
-      confirmText: "Yes, Clear Everything",
+      title: "Bersihkan Semua Data Pemrosesan?",
+      message: "Tindakan ini HANYA menghapus riwayat job pemrosesan (clipping, video generator, image studio), file video/audio render, footage unduhan, thumbnail, dan objek di MinIO bucket.\n\nAkun pengguna (User/Admin/Login), Presets, Render Styles, Katalog Tipografi/Font, dan Pengaturan Sistem/API Key 100% AMAN dan TETAP DIPERTAHANKAN.\n\nTindakan ini tidak dapat dibatalkan.",
+      confirmText: "Ya, Bersihkan Data Pemrosesan",
       danger: true,
     }))) return;
     setIsClearing(true);
     try {
       const res = await storage.clearProcessingData();
-      toast.success(res.message || "Storage cleared");
+      toast.success(res.message || "Penyimpanan dan data pemrosesan berhasil dibersihkan");
     } catch (e: any) {
-      toast.error(e.message || "Failed to clear storage");
+      toast.error(e.message || "Gagal membersihkan penyimpanan");
     } finally {
       setIsClearing(false);
     }

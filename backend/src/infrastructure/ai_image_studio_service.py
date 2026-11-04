@@ -38,6 +38,10 @@ from src.infrastructure.ai_image_typography import (
     TypographyContent,
     typography_engine,
 )
+from src.infrastructure.image_typography_store import (
+    get_all_typography_templates,
+    get_typography_template,
+)
 from src.infrastructure.db_connection import get_dict_connection
 from src.infrastructure.minio_service import MinioService
 from src.infrastructure.model_settings_store import get_model_setting
@@ -472,13 +476,14 @@ class AIImageStudioService:
         return None
 
     def suggest_quote_content(self, topic: str) -> dict[str, str]:
-        """Use 9router AI to generate high-retention viral quote, hook, and prompt."""
+        """Use 9router AI to brainstorm and generate high-impact viral quote, hook, and prompt from any topic briefing."""
+        safe_topic = (topic or "Inspirasi & Mindset").strip()
         fallback = {
-            "hook": topic.upper(),
-            "headline": f"Pelajaran paling berharga dari perjalanan memahami {topic}.",
-            "body": "Fokus pada apa yang bisa kamu kendalikan hari ini, bukan apa yang tidak bisa kamu ubah.",
-            "author": "Hermes Wisdom",
-            "prompt": f"Aesthetic visual representation of {topic}, dramatic shadows, elegant modern editorial tone",
+            "hook": safe_topic.upper()[:24],
+            "headline": f"Pelajaran paling esensial dari {safe_topic}.",
+            "body": "Fokus pada prinsip dasar dan eksekusi konsisten untuk meraih lompatan eksponensial.",
+            "author": "Hermes Director",
+            "prompt": f"Minimalist cinematic photography capturing {safe_topic}, dramatic natural lighting, 8k resolution, editorial tone",
         }
         try:
             client = NineRouterClient(timeout=45)
@@ -487,19 +492,22 @@ class AIImageStudioService:
 
             sys_prompt = (
                 "You are an elite creative director & viral copywriting psychologist. "
-                "Produce a deeply compelling Instagram/Pinterest editorial quote card content for the given topic. "
+                "The user provides a topic, content briefing, or direction. "
+                "You must autonomously explore, brainstorm, and create a fresh, deeply resonant viral angle specifically tailored to this briefing. "
+                "Whatever topic is provided (whether philosophy, tech, business, culinary, fitness, relationships, comedy, or corporate), "
+                "craft an impactful quote card content that hooks the audience instantly. "
                 "Respond strictly with a single JSON object containing: "
-                "\"hook\" (short category in uppercase, 2-3 words), "
+                "\"hook\" (short category or punchy hook in uppercase, 2-3 words), "
                 "\"headline\" (a punchy, memorable, deeply resonant statement/quote in Indonesian), "
-                "\"body\" (1-2 sentences of practical reflection or wisdom), "
-                "\"author\" (philosophical thinker, executive icon, or 'Hermes Perspective'), "
-                "\"prompt\" (cinematic photography prompt for Gemini Image Generator). "
+                "\"body\" (1-2 sentences of practical wisdom, actionable perspective, or reflection), "
+                "\"author\" (philosophical thinker, executive icon, or contextual persona matching the theme), "
+                "\"prompt\" (highly detailed cinematic photography prompt for Gemini Image Generator). "
                 "No markdown formatting, no emojis, pure JSON."
             )
             raw = client.chat(
                 messages=[
                     {"role": "system", "content": sys_prompt},
-                    {"role": "user", "content": f"Topic: {topic}"},
+                    {"role": "user", "content": f"Briefing / Topic: {safe_topic}"},
                 ],
                 max_tokens=300,
             )
@@ -521,37 +529,21 @@ class AIImageStudioService:
             return fallback
 
     def _resolve_template_and_font(self, requested_template: str, requested_font: str, topic: str) -> tuple[str, str]:
-        """Pick template and font, auto-selecting based on topic vibe if set to auto."""
-        if requested_template and requested_template != "auto":
+        """Pick template and font dynamically from DB without hardcoded mood maps."""
+        db_templates = get_all_typography_templates(active_only=True)
+        template_ids = [t["id"] for t in db_templates] or ["minimal_quote"]
+
+        if requested_template and requested_template != "auto" and requested_template in template_ids:
             template_id = requested_template
         else:
-            topic_lower = topic.lower()
-            if any(k in topic_lower for k in ["stoic", "filsafat", "seneca", "marcus", "meditasi"]):
-                template_id = "daily_stoic"
-            elif any(k in topic_lower for k in ["ai", "teknologi", "cyber", "robot", "future", "coding"]):
-                template_id = "cyberpunk_neon"
-            elif any(k in topic_lower for k in ["bisnis", "ekonomi", "uang", "saham", "investasi", "founder"]):
-                template_id = "modern_business"
-            elif any(k in topic_lower for k in ["skena", "indie", "y2k", "street", "archive", "vintage"]):
-                template_id = "skena_magazine"
-            elif any(k in topic_lower for k in ["mewah", "luxury", "gold", "executive", "mindset"]):
-                template_id = "luxury_gold"
-            elif any(k in topic_lower for k in ["berita", "news", "breaking", "update", "politik"]):
-                template_id = "news_bulletin"
-            elif any(k in topic_lower for k in ["cara", "tips", "panduan", "rahasia", "langkah"]):
-                template_id = "aesthetic_carousel_card"
-            elif any(k in topic_lower for k in ["puisi", "hati", "cinta", "tenang", "senja"]):
-                template_id = "poetic_whisper"
-            else:
-                template_id = random.choice([
-                    "minimal_quote", "bold_editorial", "brutalist_poster", "cinematic_film"
-                ])
+            # Dynamically select from active database templates
+            template_id = random.choice(template_ids)
 
         if requested_font and requested_font != "auto" and requested_font in AVAILABLE_FONTS:
             font_name = requested_font
         else:
-            meta = next((t for t in typography_engine.TEMPLATES if t["id"] == template_id), typography_engine.TEMPLATES[0])
-            font_name = meta["primary_font"]
+            tpl_meta = get_typography_template(template_id) or (db_templates[0] if db_templates else None)
+            font_name = tpl_meta["primary_font"] if tpl_meta else "Playfair Display"
 
         return template_id, font_name
 

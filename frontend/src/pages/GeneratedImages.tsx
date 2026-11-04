@@ -27,7 +27,11 @@ import {
   Upload,
   Pencil,
   RotateCcw,
+  Database,
+  BookOpen,
 } from "lucide-react";
+import { useAuth } from "@/hooks/useAuth";
+import { PlatformIcon } from "@/components/social/PlatformIcon";
 import {
   imageStudioApi,
   socialApi,
@@ -68,7 +72,9 @@ const LAYOUT_ENGINE_OPTIONS = [
 ];
 
 export function GeneratedImagesPage() {
+  const { user } = useAuth();
   const [activeTab, setActiveTab] = useState<"instant" | "automation" | "history" | "catalog">("instant");
+  const [catalogSubTab, setCatalogSubTab] = useState<"templates" | "fonts" | "aspects" | "accents">("templates");
   const [loading, setLoading] = useState<boolean>(true);
   const [savingSettings, setSavingSettings] = useState<boolean>(false);
   const [generating, setGenerating] = useState<boolean>(false);
@@ -79,10 +85,21 @@ export function GeneratedImagesPage() {
   const [settings, setSettings] = useState<ImageStudioSettings | null>(null);
   const [templates, setTemplates] = useState<TypographyTemplateMeta[]>([]);
   const [fonts, setFonts] = useState<string[]>([]);
+  const [fontsDetailed, setFontsDetailed] = useState<any[]>([]);
   const [aspectRatios, setAspectRatios] = useState<CanvasAspectRatioMeta[]>([]);
   const [accentPresets, setAccentPresets] = useState<AccentColorPreset[]>([]);
   const [accounts, setAccounts] = useState<PlatformAccountInfo[]>([]);
   const [history, setHistory] = useState<ImageStudioRun[]>([]);
+
+  const getAccountMeta = (acc: PlatformAccountInfo | any) => {
+    const accId = acc.account_id || acc._id || acc.id || "";
+    const platform = (acc.platform || acc.type || "").toLowerCase();
+    const avatar = acc.picture || acc.avatar || acc.avatar_url || "";
+    const displayName = acc.name || acc.username || acc.title || platform;
+    const username = acc.username ? (acc.username.startsWith("@") ? acc.username : `@${acc.username}`) : "";
+    const ownerName = acc.owner?.full_name || acc.owner?.email || "";
+    return { accId, platform, avatar, displayName, username, ownerName };
+  };
 
   // Instant Studio Form State
   const [topic, setTopic] = useState<string>("Mindset & Stoicism");
@@ -168,7 +185,10 @@ export function GeneratedImagesPage() {
         }
       }
       if (tplRes.success) setTemplates(tplRes.data);
-      if (fontsRes.success) setFonts(fontsRes.data);
+      if (fontsRes.success) {
+        setFonts(fontsRes.data);
+        if ((fontsRes as any).fonts) setFontsDetailed((fontsRes as any).fonts);
+      }
       if (accRes && accRes.docs) setAccounts(accRes.docs);
       if (histRes && "data" in histRes && Array.isArray(histRes.data)) setHistory(histRes.data);
       if (arRes && "data" in arRes && Array.isArray(arRes.data)) setAspectRatios(arRes.data);
@@ -459,7 +479,7 @@ export function GeneratedImagesPage() {
   };
 
   return (
-    <div className="space-y-6 pb-24 text-zinc-100">
+    <div className="flex-1 min-h-0 h-full overflow-y-auto pr-1 pb-24 space-y-6 text-zinc-100 overscroll-contain">
       {/* ─── Top Page Header ─────────────────────────────────────────────── */}
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-zinc-800/80 pb-5">
         <div>
@@ -932,31 +952,65 @@ export function GeneratedImagesPage() {
                 {autoPostInstant && (
                   <div className="mt-2 space-y-2">
                     <span className="text-[11px] text-zinc-400 block">Pilih Akun Tujuan:</span>
-                    <div className="grid grid-cols-2 md:grid-cols-3 gap-2">
-                      {accounts.map((acc) => {
-                        const accId = acc.account_id;
-                        const isSelected = selectedAccountIds.includes(accId);
-                        return (
-                          <button
-                            key={accId}
-                            type="button"
-                            onClick={() => {
-                              setSelectedAccountIds((prev) =>
-                                isSelected ? prev.filter((id) => id !== accId) : [...prev, accId]
-                              );
-                            }}
-                            className={cn(
-                              "flex items-center gap-2 px-2.5 py-1.5 rounded-lg border text-xs text-left transition-colors",
-                              isSelected
-                                ? "border-purple-500 bg-purple-500/15 text-purple-300 font-medium"
-                                : "border-zinc-800 bg-zinc-900/60 text-zinc-400 hover:text-zinc-200"
-                            )}
-                          >
-                            <div className="h-2 w-2 rounded-full bg-purple-400 shrink-0" />
-                            <span className="truncate">{acc.username || acc.name || acc.platform}</span>
-                          </button>
-                        );
-                      })}
+                    <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-2">
+                      {accounts.length === 0 ? (
+                        <div className="col-span-full py-3 px-4 rounded-xl border border-zinc-800 bg-zinc-900/40 text-center text-xs text-zinc-400">
+                          Belum ada akun media sosial yang terhubung. Buka menu Social Accounts untuk menghubungkan akun.
+                        </div>
+                      ) : (
+                        accounts.map((acc) => {
+                          const { accId, platform, avatar, displayName, username, ownerName } = getAccountMeta(acc);
+                          const isSelected = selectedAccountIds.includes(accId);
+                          return (
+                            <button
+                              key={accId}
+                              type="button"
+                              onClick={() => {
+                                setSelectedAccountIds((prev) =>
+                                  isSelected ? prev.filter((id) => id !== accId) : [...prev, accId]
+                                );
+                              }}
+                              className={cn(
+                                "flex items-center gap-2.5 p-2 rounded-xl border text-xs text-left transition-all",
+                                isSelected
+                                  ? "border-purple-500 bg-purple-500/15 text-purple-200 ring-1 ring-purple-500/30"
+                                  : "border-zinc-800 bg-zinc-900/60 text-zinc-400 hover:text-zinc-200 hover:border-zinc-700"
+                              )}
+                            >
+                              {avatar ? (
+                                <img
+                                  src={avatar}
+                                  alt=""
+                                  className="h-8 w-8 rounded-full object-cover shrink-0 ring-1 ring-zinc-700 bg-zinc-800"
+                                />
+                              ) : (
+                                <div className="h-8 w-8 rounded-full bg-zinc-800 border border-zinc-700 flex items-center justify-center shrink-0">
+                                  <PlatformIcon type={platform} className="h-4 w-4 text-zinc-300" />
+                                </div>
+                              )}
+                              <div className="min-w-0 flex-1">
+                                <div className="flex items-center gap-1.5">
+                                  <span className="font-semibold text-xs text-zinc-200 truncate">{displayName}</span>
+                                  <PlatformIcon type={platform} className="h-3 w-3 shrink-0" />
+                                </div>
+                                <div className="flex items-center gap-1.5 text-[10px] text-zinc-400 truncate">
+                                  {username && <span className="truncate">{username}</span>}
+                                  {user?.is_superadmin && ownerName && (
+                                    <span className="text-[9px] px-1 rounded bg-zinc-800 text-zinc-400 border border-zinc-700/60 truncate">
+                                      {ownerName}
+                                    </span>
+                                  )}
+                                </div>
+                              </div>
+                              {isSelected && (
+                                <div className="h-4 w-4 rounded-full bg-purple-500 flex items-center justify-center shrink-0 text-white">
+                                  <Check className="h-2.5 w-2.5 stroke-[3]" />
+                                </div>
+                              )}
+                            </button>
+                          );
+                        })
+                      )}
                     </div>
                   </div>
                 )}
@@ -1197,19 +1251,58 @@ export function GeneratedImagesPage() {
 
             {/* Topic Rotation */}
             <div className="space-y-3 pt-2">
-              <h4 className="text-xs font-semibold text-zinc-200 uppercase tracking-wider">
-                Rotasi Topik Hermes Harian
-              </h4>
-              <p className="text-[11px] text-zinc-500">
-                Hermes akan memilih topik dari daftar ini untuk diproses setiap sesinya
-              </p>
+              <div className="flex items-center justify-between">
+                <div>
+                  <h4 className="text-xs font-semibold text-zinc-200 uppercase tracking-wider flex items-center gap-2">
+                    <span>Rotasi Topik Hermes Harian</span>
+                    <span className="px-2 py-0.5 rounded-full text-[10px] bg-purple-500/20 text-purple-300 border border-purple-500/30">
+                      {settings?.topics.length || 0} Briefing Aktif
+                    </span>
+                  </h4>
+                  <p className="text-[11px] text-zinc-400 mt-0.5">
+                    Masukkan briefing, topik, atau arahan konten apapun (bebas tanpa batasan domain). Hermes akan mandiri mengeksplorasi sudut pandang unik, merumuskan teks, dan menciptakan prompt visual secara kreatif setiap harinya.
+                  </p>
+                </div>
+              </div>
+
+              {/* Quick Inspiration Badges */}
+              <div className="space-y-1.5">
+                <span className="text-[10px] text-zinc-500 uppercase tracking-wider block">Inspirasi Cepat Topik (Klik untuk Menambahkan):</span>
+                <div className="flex flex-wrap gap-1.5">
+                  {[
+                    "Motivasi & Stoikisme Modern",
+                    "Mindset Sukses & Finansial",
+                    "Strategi Bisnis & Kepemimpinan",
+                    "Teknologi & Tren AI 2026",
+                    "Produktivitas & Deep Work",
+                    "Kesehatan Mental & Kebugaran",
+                    "Parenting & Edukasi Keluarga",
+                    "Filosofi Ketenangan Hidup",
+                  ].map((sugg) => (
+                    <button
+                      key={sugg}
+                      type="button"
+                      onClick={() => {
+                        if (!settings) return;
+                        if (!settings.topics.includes(sugg)) {
+                          setSettings({ ...settings, topics: [...settings.topics, sugg] });
+                        }
+                      }}
+                      className="px-2.5 py-1 rounded-lg bg-zinc-900 hover:bg-zinc-800 border border-zinc-800/80 hover:border-zinc-700 text-[11px] text-zinc-400 hover:text-zinc-200 transition-colors flex items-center gap-1"
+                    >
+                      <Plus className="h-3 w-3 text-purple-400" />
+                      <span>{sugg}</span>
+                    </button>
+                  ))}
+                </div>
+              </div>
 
               <div className="flex gap-2">
                 <input
                   type="text"
                   value={newTopicInput}
                   onChange={(e) => setNewTopicInput(e.target.value)}
-                  placeholder="Tambahkan topik baru (misal: Tips Produktivitas Pagi)..."
+                  placeholder="Ketik topik atau briefing bebas (misal: Tips Mengatasi Burnout di Tempat Kerja)..."
                   className="flex-1 rounded-xl bg-zinc-900 border border-zinc-800 px-3.5 py-2 text-xs text-zinc-200 focus:outline-none focus:border-cyan-500"
                   onKeyDown={(e) => {
                     if (e.key === "Enter" && newTopicInput.trim() && settings) {
@@ -1245,7 +1338,7 @@ export function GeneratedImagesPage() {
                         const updated = settings.topics.filter((_, i) => i !== idx);
                         setSettings({ ...settings, topics: updated });
                       }}
-                      className="text-zinc-500 hover:text-rose-400"
+                      className="text-zinc-500 hover:text-rose-400 p-0.5"
                     >
                       <X className="h-3 w-3" />
                     </button>
@@ -1261,8 +1354,8 @@ export function GeneratedImagesPage() {
                   <h4 className="text-xs font-semibold text-zinc-200 uppercase tracking-wider">
                     Auto-Post ke Akun Media Sosial
                   </h4>
-                  <p className="text-[11px] text-zinc-500">
-                    Secara otomatis jadwalkan dan publikasikan hasil visual ke media sosial setiap sesi berjalan
+                  <p className="text-[11px] text-zinc-400">
+                    Secara otomatis jadwalkan dan publikasikan hasil visual ke akun media sosial setiap sesi berjalan
                   </p>
                 </div>
                 <label className="relative inline-flex items-center cursor-pointer">
@@ -1277,34 +1370,65 @@ export function GeneratedImagesPage() {
               </div>
 
               {settings?.auto_post_enabled && (
-                <div className="grid grid-cols-2 md:grid-cols-3 gap-2.5 pt-1">
-                  {accounts.map((acc) => {
-                    const accId = acc.account_id;
-                    const isSelected = (settings.target_account_ids || []).includes(accId);
-                    return (
-                      <button
-                        key={accId}
-                        type="button"
-                        onClick={() => {
-                          const prev = settings.target_account_ids || [];
-                          const updated = isSelected ? prev.filter((id) => id !== accId) : [...prev, accId];
-                          setSettings({ ...settings, target_account_ids: updated });
-                        }}
-                        className={cn(
-                          "flex items-center gap-2.5 p-3 rounded-xl border text-xs text-left transition-colors",
-                          isSelected
-                            ? "border-purple-500 bg-purple-500/15 text-purple-300 font-medium"
-                            : "border-zinc-800 bg-zinc-900/60 text-zinc-400 hover:text-zinc-200"
-                        )}
-                      >
-                        <div className="h-2.5 w-2.5 rounded-full bg-purple-400 shrink-0" />
-                        <div className="min-w-0">
-                          <p className="font-semibold truncate">{acc.username || acc.name}</p>
-                          <p className="text-[10px] text-zinc-500 capitalize">{acc.platform}</p>
-                        </div>
-                      </button>
-                    );
-                  })}
+                <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-2.5 pt-1">
+                  {accounts.length === 0 ? (
+                    <div className="col-span-full py-4 px-4 rounded-xl border border-zinc-800 bg-zinc-900/40 text-center text-xs text-zinc-400">
+                      Belum ada akun media sosial yang terhubung. Kunjungi menu Social Accounts untuk menghubungkan akun Anda.
+                    </div>
+                  ) : (
+                    accounts.map((acc) => {
+                      const { accId, platform, avatar, displayName, username, ownerName } = getAccountMeta(acc);
+                      const isSelected = (settings.target_account_ids || []).includes(accId);
+                      return (
+                        <button
+                          key={accId}
+                          type="button"
+                          onClick={() => {
+                            const prev = settings.target_account_ids || [];
+                            const updated = isSelected ? prev.filter((id) => id !== accId) : [...prev, accId];
+                            setSettings({ ...settings, target_account_ids: updated });
+                          }}
+                          className={cn(
+                            "flex items-center gap-3 p-3 rounded-xl border text-xs text-left transition-all",
+                            isSelected
+                              ? "border-purple-500 bg-purple-500/15 text-purple-200 ring-1 ring-purple-500/30"
+                              : "border-zinc-800 bg-zinc-900/60 text-zinc-400 hover:text-zinc-200 hover:border-zinc-700"
+                          )}
+                        >
+                          {avatar ? (
+                            <img
+                              src={avatar}
+                              alt=""
+                              className="h-8 w-8 rounded-full object-cover shrink-0 ring-1 ring-zinc-700 bg-zinc-800"
+                            />
+                          ) : (
+                            <div className="h-8 w-8 rounded-full bg-zinc-800 border border-zinc-700 flex items-center justify-center shrink-0">
+                              <PlatformIcon type={platform} className="h-4 w-4 text-zinc-300" />
+                            </div>
+                          )}
+                          <div className="min-w-0 flex-1">
+                            <div className="flex items-center gap-1.5">
+                              <span className="font-semibold text-xs text-zinc-200 truncate">{displayName}</span>
+                              <PlatformIcon type={platform} className="h-3 w-3 shrink-0" />
+                            </div>
+                            <div className="flex items-center gap-1.5 text-[10px] text-zinc-400 truncate">
+                              {username && <span className="truncate">{username}</span>}
+                              {user?.is_superadmin && ownerName && (
+                                <span className="text-[9px] px-1 rounded bg-zinc-800 text-zinc-400 border border-zinc-700/60 truncate">
+                                  {ownerName}
+                                </span>
+                              )}
+                            </div>
+                          </div>
+                          {isSelected && (
+                            <div className="h-4 w-4 rounded-full bg-purple-500 flex items-center justify-center shrink-0 text-white">
+                              <Check className="h-2.5 w-2.5 stroke-[3]" />
+                            </div>
+                          )}
+                        </button>
+                      );
+                    })
+                  )}
                 </div>
               )}
             </div>
@@ -1466,91 +1590,247 @@ export function GeneratedImagesPage() {
             </div>
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
-            {templates.map((tpl) => (
-              <div
-                key={tpl.id}
-                className="rounded-2xl border border-zinc-800 bg-[#0e0e12] p-5 space-y-4 flex flex-col justify-between"
-              >
-                <div className="space-y-3">
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-2 min-w-0">
-                      <span className="text-sm font-bold text-white truncate">{tpl.name}</span>
+          {/* Sub Navigation for Database Typography Catalogue */}
+          <div className="flex items-center gap-2 border-b border-zinc-800/60 pb-2">
+            <button
+              type="button"
+              onClick={() => setCatalogSubTab("templates")}
+              className={cn(
+                "px-3 py-1.5 rounded-lg text-xs font-semibold transition-all flex items-center gap-1.5",
+                catalogSubTab === "templates"
+                  ? "bg-purple-500/20 text-purple-300 border border-purple-500/40"
+                  : "text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800/50"
+              )}
+            >
+              <Layers className="h-3.5 w-3.5" />
+              <span>Preset Template ({templates.length})</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setCatalogSubTab("fonts")}
+              className={cn(
+                "px-3 py-1.5 rounded-lg text-xs font-semibold transition-all flex items-center gap-1.5",
+                catalogSubTab === "fonts"
+                  ? "bg-purple-500/20 text-purple-300 border border-purple-500/40"
+                  : "text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800/50"
+              )}
+            >
+              <Type className="h-3.5 w-3.5" />
+              <span>Koleksi Font ({fontsDetailed.length || fonts.length})</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setCatalogSubTab("aspects")}
+              className={cn(
+                "px-3 py-1.5 rounded-lg text-xs font-semibold transition-all flex items-center gap-1.5",
+                catalogSubTab === "aspects"
+                  ? "bg-purple-500/20 text-purple-300 border border-purple-500/40"
+                  : "text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800/50"
+              )}
+            >
+              <Sliders className="h-3.5 w-3.5" />
+              <span>Rasio Kanvas ({aspectRatios.length})</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setCatalogSubTab("accents")}
+              className={cn(
+                "px-3 py-1.5 rounded-lg text-xs font-semibold transition-all flex items-center gap-1.5",
+                catalogSubTab === "accents"
+                  ? "bg-purple-500/20 text-purple-300 border border-purple-500/40"
+                  : "text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800/50"
+              )}
+            >
+              <Palette className="h-3.5 w-3.5" />
+              <span>Preset Aksen ({accentPresets.length})</span>
+            </button>
+          </div>
+
+          {/* Sub-tab 1: Templates */}
+          {catalogSubTab === "templates" && (
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
+              {templates.map((tpl) => (
+                <div
+                  key={tpl.id}
+                  className="rounded-2xl border border-zinc-800 bg-[#0e0e12] p-5 space-y-4 flex flex-col justify-between"
+                >
+                  <div className="space-y-3">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2 min-w-0">
+                        <span className="text-sm font-bold text-white truncate">{tpl.name}</span>
+                        <span
+                          className="h-3.5 w-3.5 rounded-full shrink-0 border border-white/20"
+                          style={{ backgroundColor: tpl.recommended_accent }}
+                          title={`Aksen: ${tpl.recommended_accent}`}
+                        />
+                      </div>
                       <span
-                        className="h-3.5 w-3.5 rounded-full shrink-0 border border-white/20"
-                        style={{ backgroundColor: tpl.recommended_accent }}
-                        title={`Aksen: ${tpl.recommended_accent}`}
-                      />
+                        className={cn(
+                          "text-[10px] px-2 py-0.5 rounded-full font-medium border shrink-0",
+                          tpl.is_builtin
+                            ? "bg-zinc-800/80 text-zinc-400 border-zinc-700/60"
+                            : "bg-emerald-500/15 text-emerald-400 border-emerald-500/30"
+                        )}
+                      >
+                        {tpl.is_builtin ? "Preset Bawaan" : "Kustom"}
+                      </span>
                     </div>
-                    <span
-                      className={cn(
-                        "text-[10px] px-2 py-0.5 rounded-full font-medium border shrink-0",
-                        tpl.is_builtin
-                          ? "bg-zinc-800/80 text-zinc-400 border-zinc-700/60"
-                          : "bg-emerald-500/15 text-emerald-400 border-emerald-500/30"
-                      )}
-                    >
-                      {tpl.is_builtin ? "Preset Bawaan" : "Kustom"}
-                    </span>
+
+                    <p className="text-xs text-zinc-400 line-clamp-2">{tpl.vibe}</p>
+
+                    <div className="rounded-xl bg-zinc-900/80 p-3 space-y-1.5 text-[11px] text-zinc-400 border border-zinc-800/60 font-mono">
+                      <div className="flex justify-between">
+                        <span className="text-zinc-500">Engine Layout:</span>
+                        <span className="text-cyan-400 font-medium truncate max-w-[150px]">{tpl.layout_type || tpl.id}</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-zinc-500">Font Utama:</span>
+                        <span className="text-zinc-200 font-medium truncate max-w-[150px]">{tpl.primary_font}</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-zinc-500">Font Sekunder:</span>
+                        <span className="text-zinc-200 font-medium truncate max-w-[150px]">{tpl.secondary_font}</span>
+                      </div>
+                    </div>
                   </div>
 
-                  <p className="text-xs text-zinc-400 line-clamp-2">{tpl.vibe}</p>
+                  <div className="space-y-2 pt-2 border-t border-zinc-800/60">
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setSelectedTemplate(tpl.id);
+                          setAccentColor(tpl.recommended_accent);
+                          setActiveTab("instant");
+                        }}
+                        className="flex-1 flex items-center justify-center gap-1.5 py-2 px-3 rounded-xl bg-purple-600/20 hover:bg-purple-600/30 border border-purple-500/40 text-purple-300 text-xs font-semibold transition-colors"
+                      >
+                        <Sparkles className="h-3.5 w-3.5" />
+                        <span>Gunakan Template</span>
+                      </button>
 
-                  <div className="rounded-xl bg-zinc-900/80 p-3 space-y-1.5 text-[11px] text-zinc-400 border border-zinc-800/60 font-mono">
-                    <div className="flex justify-between">
-                      <span className="text-zinc-500">Engine Layout:</span>
-                      <span className="text-cyan-400 font-medium truncate max-w-[150px]">{tpl.layout_type || tpl.id}</span>
-                    </div>
-                    <div className="flex justify-between">
-                      <span className="text-zinc-500">Font Utama:</span>
-                      <span className="text-zinc-200 font-medium truncate max-w-[150px]">{tpl.primary_font}</span>
-                    </div>
-                    <div className="flex justify-between">
-                      <span className="text-zinc-500">Font Sekunder:</span>
-                      <span className="text-zinc-200 font-medium truncate max-w-[150px]">{tpl.secondary_font}</span>
+                      <button
+                        type="button"
+                        onClick={() => handleOpenEditTemplateModal(tpl)}
+                        className="p-2 rounded-xl bg-zinc-800 hover:bg-zinc-700 text-zinc-300 hover:text-white transition-colors"
+                        title="Edit Konfigurasi Template di Database"
+                      >
+                        <Pencil className="h-3.5 w-3.5" />
+                      </button>
+
+                      {!tpl.is_builtin && (
+                        <button
+                          type="button"
+                          onClick={() => handleDeleteTemplate(tpl.id, tpl.name)}
+                          className="p-2 rounded-xl bg-zinc-800 hover:bg-rose-900/40 text-zinc-400 hover:text-rose-400 transition-colors"
+                          title="Hapus Template Kustom dari Database"
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </button>
+                      )}
                     </div>
                   </div>
                 </div>
+              ))}
+            </div>
+          )}
 
-                <div className="space-y-2 pt-2 border-t border-zinc-800/60">
-                  <div className="flex items-center gap-2">
+          {/* Sub-tab 2: Fonts */}
+          {catalogSubTab === "fonts" && (
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+              {(fontsDetailed.length > 0 ? fontsDetailed : fonts.map((fn, idx) => ({ id: `font_${idx}`, font_name: fn, file_name: `${fn.replace(/ /g, '')}.ttf`, is_builtin: 1 }))).map((f) => (
+                <div key={f.id || f.font_name} className="rounded-2xl border border-zinc-800 bg-[#0e0e12] p-4 space-y-3">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <Type className="h-4 w-4 text-purple-400" />
+                      <span className="text-xs font-bold text-white">{f.font_name}</span>
+                    </div>
+                    <span className="text-[10px] px-2 py-0.5 rounded-full bg-zinc-800 text-zinc-400 border border-zinc-700/60">
+                      {f.is_builtin ? "Built-in TTF" : "Custom Font"}
+                    </span>
+                  </div>
+                  <div className="rounded-xl bg-zinc-950 p-3 border border-zinc-800/80">
+                    <p className="text-xs text-zinc-400 font-mono text-[10px] mb-1">File: {f.file_name}</p>
+                    <p className="text-sm text-zinc-100 font-medium line-clamp-1" style={{ fontFamily: f.font_name }}>
+                      The quick brown fox jumps over the lazy dog.
+                    </p>
+                  </div>
+                  <div className="flex justify-between items-center text-[10px] text-zinc-500 pt-1 border-t border-zinc-800/60">
+                    <span>Tabel: image_typography_fonts</span>
                     <button
                       type="button"
                       onClick={() => {
-                        setSelectedTemplate(tpl.id);
-                        setAccentColor(tpl.recommended_accent);
+                        setSelectedFont(f.font_name);
                         setActiveTab("instant");
                       }}
-                      className="flex-1 flex items-center justify-center gap-1.5 py-2 px-3 rounded-xl bg-purple-600/20 hover:bg-purple-600/30 border border-purple-500/40 text-purple-300 text-xs font-semibold transition-colors"
+                      className="text-purple-400 hover:text-purple-300 font-medium"
                     >
-                      <Sparkles className="h-3.5 w-3.5" />
-                      <span>Gunakan Template</span>
+                      Pilih Font Ini
                     </button>
-
-                    <button
-                      type="button"
-                      onClick={() => handleOpenEditTemplateModal(tpl)}
-                      className="p-2 rounded-xl bg-zinc-800 hover:bg-zinc-700 text-zinc-300 hover:text-white transition-colors"
-                      title="Edit Konfigurasi Template di Database"
-                    >
-                      <Pencil className="h-3.5 w-3.5" />
-                    </button>
-
-                    {!tpl.is_builtin && (
-                      <button
-                        type="button"
-                        onClick={() => handleDeleteTemplate(tpl.id, tpl.name)}
-                        className="p-2 rounded-xl bg-zinc-800 hover:bg-rose-900/40 text-zinc-400 hover:text-rose-400 transition-colors"
-                        title="Hapus Template Kustom dari Database"
-                      >
-                        <Trash2 className="h-3.5 w-3.5" />
-                      </button>
-                    )}
                   </div>
                 </div>
-              </div>
-            ))}
-          </div>
+              ))}
+            </div>
+          )}
+
+          {/* Sub-tab 3: Canvas Aspect Ratios */}
+          {catalogSubTab === "aspects" && (
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+              {aspectRatios.map((ar) => (
+                <div key={ar.id} className="rounded-2xl border border-zinc-800 bg-[#0e0e12] p-4 space-y-3 flex flex-col justify-between">
+                  <div className="space-y-2">
+                    <div className="flex items-center justify-between">
+                      <span className="text-sm font-bold text-white">{ar.id}</span>
+                      <span className="text-[10px] px-2 py-0.5 rounded-full bg-cyan-500/15 text-cyan-300 border border-cyan-500/30">
+                        {ar.width} x {ar.height} px
+                      </span>
+                    </div>
+                    <p className="text-xs font-medium text-zinc-300">{ar.name}</p>
+                    <p className="text-[11px] text-zinc-500 line-clamp-3">{ar.description}</p>
+                  </div>
+                  <div className="pt-2 border-t border-zinc-800/60 flex items-center justify-between">
+                    <span className="text-[10px] text-zinc-500 font-mono">SQLite DB</span>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setAspectRatio(ar.id);
+                        setActiveTab("instant");
+                      }}
+                      className="text-xs text-cyan-400 hover:text-cyan-300 font-medium"
+                    >
+                      Gunakan Rasio
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* Sub-tab 4: Accent Color Presets */}
+          {catalogSubTab === "accents" && (
+            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-7 gap-3">
+              {accentPresets.map((ac) => (
+                <button
+                  key={ac.id}
+                  type="button"
+                  onClick={() => {
+                    setAccentColor(ac.hex);
+                    setActiveTab("instant");
+                  }}
+                  className="rounded-xl border border-zinc-800 bg-[#0e0e12] p-3 text-center space-y-2 hover:border-zinc-700 transition-all group"
+                >
+                  <div
+                    className="h-9 w-full rounded-lg border border-white/20 shadow-inner group-hover:scale-105 transition-transform"
+                    style={{ backgroundColor: ac.hex }}
+                  />
+                  <div>
+                    <p className="text-xs font-bold text-white">{ac.name}</p>
+                    <p className="text-[10px] font-mono text-zinc-400">{ac.hex}</p>
+                  </div>
+                </button>
+              ))}
+            </div>
+          )}
         </div>
       )}
 
@@ -1585,34 +1865,67 @@ export function GeneratedImagesPage() {
                   <span className="text-[11px] font-medium text-zinc-400 uppercase tracking-wider block mb-2">
                     Pilih Akun Tujuan:
                   </span>
-                  <div className="space-y-1.5 max-h-48 overflow-y-auto">
-                    {accounts.map((acc) => {
-                      const accId = acc.account_id;
-                      const isSelected = selectedAccountIds.includes(accId);
-                      return (
-                        <button
-                          key={accId}
-                          type="button"
-                          onClick={() => {
-                            setSelectedAccountIds((prev) =>
-                              isSelected ? prev.filter((id) => id !== accId) : [...prev, accId]
-                            );
-                          }}
-                          className={cn(
-                            "w-full flex items-center justify-between p-2.5 rounded-xl border text-xs text-left transition-colors",
-                            isSelected
-                              ? "border-purple-500 bg-purple-500/15 text-purple-300 font-medium"
-                              : "border-zinc-800 bg-zinc-900/60 text-zinc-400 hover:text-zinc-200"
-                          )}
-                        >
-                          <div className="flex items-center gap-2 min-w-0">
-                            <div className="h-2 w-2 rounded-full bg-purple-400 shrink-0" />
-                            <span className="truncate">{acc.username || acc.name}</span>
-                          </div>
-                          <span className="text-[10px] text-zinc-500 capitalize">{acc.platform}</span>
-                        </button>
-                      );
-                    })}
+                  <div className="space-y-1.5 max-h-56 overflow-y-auto pr-0.5">
+                    {accounts.length === 0 ? (
+                      <div className="py-4 px-3 rounded-xl border border-zinc-800 bg-zinc-900/40 text-center text-xs text-zinc-400">
+                        Belum ada akun media sosial yang terhubung.
+                      </div>
+                    ) : (
+                      accounts.map((acc) => {
+                        const { accId, platform, avatar, displayName, username, ownerName } = getAccountMeta(acc);
+                        const isSelected = selectedAccountIds.includes(accId);
+                        return (
+                          <button
+                            key={accId}
+                            type="button"
+                            onClick={() => {
+                              setSelectedAccountIds((prev) =>
+                                isSelected ? prev.filter((id) => id !== accId) : [...prev, accId]
+                              );
+                            }}
+                            className={cn(
+                              "w-full flex items-center justify-between p-2.5 rounded-xl border text-xs text-left transition-all",
+                              isSelected
+                                ? "border-purple-500 bg-purple-500/15 text-purple-200 ring-1 ring-purple-500/30"
+                                : "border-zinc-800 bg-zinc-900/60 text-zinc-400 hover:text-zinc-200 hover:border-zinc-700"
+                            )}
+                          >
+                            <div className="flex items-center gap-2.5 min-w-0 flex-1">
+                              {avatar ? (
+                                <img
+                                  src={avatar}
+                                  alt=""
+                                  className="h-8 w-8 rounded-full object-cover shrink-0 ring-1 ring-zinc-700 bg-zinc-800"
+                                />
+                              ) : (
+                                <div className="h-8 w-8 rounded-full bg-zinc-800 border border-zinc-700 flex items-center justify-center shrink-0">
+                                  <PlatformIcon type={platform} className="h-4 w-4 text-zinc-300" />
+                                </div>
+                              )}
+                              <div className="min-w-0 flex-1">
+                                <div className="flex items-center gap-1.5">
+                                  <span className="font-semibold text-xs text-zinc-200 truncate">{displayName}</span>
+                                  <PlatformIcon type={platform} className="h-3 w-3 shrink-0" />
+                                </div>
+                                <div className="flex items-center gap-1.5 text-[10px] text-zinc-400 truncate">
+                                  {username && <span className="truncate">{username}</span>}
+                                  {user?.is_superadmin && ownerName && (
+                                    <span className="text-[9px] px-1 rounded bg-zinc-800 text-zinc-400 border border-zinc-700/60 truncate">
+                                      {ownerName}
+                                    </span>
+                                  )}
+                                </div>
+                              </div>
+                            </div>
+                            {isSelected && (
+                              <div className="h-4 w-4 rounded-full bg-purple-500 flex items-center justify-center shrink-0 text-white ml-2">
+                                <Check className="h-2.5 w-2.5 stroke-[3]" />
+                              </div>
+                            )}
+                          </button>
+                        );
+                      })
+                    )}
                   </div>
                 </div>
 
