@@ -1049,7 +1049,7 @@ export const socialApi = {
     return request<PlatformsStatusResponse>("/api/social/accounts/platforms-status");
   },
   async getAccounts(): Promise<{ docs: PlatformAccountInfo[] }> {
-    return request("/api/social/accounts?page=1&limit=200");
+    return request("/api/social/accounts?page=1&limit=100");
   },
   async twitterAuthorize(redirect: string): Promise<{ url: string }> {
     return request(`/api/social/twitter/authorize?redirect=${encodeURIComponent(redirect)}`);

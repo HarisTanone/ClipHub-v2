@@ -170,15 +170,23 @@ class SocialAutoPostService:
         finally:
             conn.close()
 
-        # Fetch live accounts from Repliz
+        # Fetch live accounts from Repliz (Repliz strictly caps limit <= 100)
         repliz_map = {}
         try:
-            live_res = await repliz_get("/public/account?page=1&limit=200")
-            if isinstance(live_res, dict) and "docs" in live_res:
-                for acc in live_res["docs"]:
-                    acc_id = str(acc.get("_id") or acc.get("id") or "")
-                    if acc_id:
-                        repliz_map[acc_id] = acc
+            page = 1
+            while True:
+                live_res = await repliz_get(f"/public/account?page={page}&limit=100")
+                if isinstance(live_res, dict) and "docs" in live_res:
+                    for acc in live_res["docs"]:
+                        acc_id = str(acc.get("_id") or acc.get("id") or "")
+                        if acc_id:
+                            repliz_map[acc_id] = acc
+                    total_pages = int(live_res.get("totalPages", 1) or 1)
+                    if page >= total_pages:
+                        break
+                    page += 1
+                else:
+                    break
         except Exception as e:
             logger.warning(f"Failed to fetch live Repliz accounts: {e}")
 
@@ -199,10 +207,11 @@ class SocialAutoPostService:
                     "owner_email": la.get("owner_email"),
                 })
 
-        # If no local mapping found and user_id is None (superadmin), use Repliz directly
-        if not merged_accounts and user_id is None and repliz_map:
+        # For superadmin (user_id is None), include any live Repliz accounts not yet in local DB
+        if user_id is None and repliz_map:
+            seen_ids = {a["account_id"] for a in merged_accounts}
             for acc_id, acc in repliz_map.items():
-                if acc.get("isConnected", True):
+                if acc_id not in seen_ids and acc.get("isConnected", True):
                     merged_accounts.append({
                         "account_id": acc_id,
                         "platform": acc.get("type", "unknown").lower(),
@@ -210,13 +219,14 @@ class SocialAutoPostService:
                         "username": acc.get("username") or "",
                         "picture": acc.get("picture") or "",
                         "user_id": None,
+                        "owner_email": None,
                     })
 
         return merged_accounts
 
     async def get_platforms_status(self, user_id: Optional[int] = None) -> Dict[str, Any]:
         """Check connection status for each social media platform for the user."""
-        all_platforms = ["tiktok", "instagram", "youtube", "facebook", "threads", "linkedin"]
+        all_platforms = ["tiktok", "instagram", "facebook", "youtube", "threads", "twitter", "pinterest", "linkedin"]
         connected_accs = await self.get_connected_accounts(user_id=user_id)
 
         status_by_platform: Dict[str, Any] = {}

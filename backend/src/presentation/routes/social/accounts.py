@@ -2,6 +2,7 @@
 
 Filters accounts by user ownership. Superadmin can see all.
 """
+import logging
 from typing import Optional
 
 from fastapi import APIRouter, Depends, Query
@@ -12,6 +13,8 @@ from src.presentation.auth_deps import CurrentUser
 from src.presentation.routes.social.helpers import repliz_get, repliz_delete
 from src.infrastructure.database import async_session, SocialAccountModel
 from src.infrastructure.db_connection import get_dict_connection
+
+logger = logging.getLogger(__name__)
 
 accounts_router = APIRouter(tags=["social-accounts"])
 
@@ -100,13 +103,40 @@ async def list_accounts(
     user: CurrentUser = Depends(get_current_user),
 ):
     """List connected social accounts (filtered by user ownership)."""
-    params: dict = {"page": page, "limit": limit}
+    # Repliz API strictly enforces limit <= 100. Guard against HTTP 400.
+    repliz_limit = min(max(1, limit), 100)
+    params: dict = {"page": page, "limit": repliz_limit}
     if types:
         for i, t in enumerate(types.split(",")):
             params[f"types[{i}]"] = t.strip()
     if search:
         params["search"] = search
-    data = await repliz_get("/public/account", params=params)
+
+    try:
+        data = await repliz_get("/public/account", params=params)
+        if not isinstance(data, dict):
+            data = {"docs": []}
+    except Exception as e:
+        logger.warning(f"Failed to fetch accounts from Repliz: {e}")
+        data = {"docs": []}
+
+    docs = list(data.get("docs") or [])
+    total_pages = int(data.get("totalPages", 1) or 1)
+
+    # If client requested limit > 100 and multiple pages exist, aggregate pages
+    current_page = page
+    while len(docs) < limit and current_page < total_pages:
+        current_page += 1
+        next_params = dict(params)
+        next_params["page"] = current_page
+        try:
+            next_data = await repliz_get("/public/account", params=next_params)
+            next_docs = next_data.get("docs") or []
+            if not next_docs:
+                break
+            docs.extend(next_docs)
+        except Exception:
+            break
 
     # Load account ownership mappings
     owner_map = {}
@@ -123,17 +153,35 @@ async def list_accounts(
                 "user_id": row["user_id"],
                 "email": row["email"] or "",
                 "full_name": row["full_name"] or "",
+                "name": row["name"] or "",
+                "platform": row["platform"] or "",
             }
         conn.close()
     except Exception:
         owner_map = {}
 
-    docs = data.get("docs") or []
+    # If Repliz returned no docs (e.g. temporary API failure), fallback to local DB accounts
+    if not docs and owner_map:
+        for acc_id, meta in owner_map.items():
+            docs.append({
+                "_id": acc_id,
+                "id": acc_id,
+                "name": meta.get("name") or "Account",
+                "username": meta.get("email") or "",
+                "type": meta.get("platform") or "unknown",
+                "isConnected": True,
+                "owner": {
+                    "user_id": meta.get("user_id"),
+                    "email": meta.get("email") or "",
+                    "full_name": meta.get("full_name") or "",
+                },
+            })
 
     # Attach owner metadata to each doc
     for acc in docs:
         acc_id = acc.get("_id") or acc.get("id") or ""
-        acc["owner"] = owner_map.get(acc_id)
+        if not acc.get("owner"):
+            acc["owner"] = owner_map.get(acc_id)
 
     # Filter by ownership unless superadmin
     if not user.is_superadmin:
@@ -160,16 +208,30 @@ async def get_platforms_status(user: CurrentUser = Depends(get_current_user)):
 async def count_accounts(user: CurrentUser = Depends(get_current_user)):
     """Get account count breakdown per platform (filtered by user)."""
     if user.is_superadmin:
-        return await repliz_get("/public/account/count")
+        try:
+            return await repliz_get("/public/account/count")
+        except Exception:
+            pass
 
-    # For regular users, count from local DB
+    # For regular users or on fallback, count from local DB
     async with async_session() as session:
-        result = await session.execute(
-            select(SocialAccountModel.platform).where(SocialAccountModel.user_id == user.id)
-        )
+        query = select(SocialAccountModel.platform)
+        if not user.is_superadmin:
+            query = query.where(SocialAccountModel.user_id == user.id)
+        result = await session.execute(query)
         platforms = [row[0] for row in result.fetchall()]
 
-    counts = {"total": len(platforms), "facebook": 0, "instagram": 0, "tiktok": 0, "threads": 0, "youtube": 0, "linkedin": 0}
+    counts = {
+        "total": len(platforms),
+        "facebook": 0,
+        "instagram": 0,
+        "tiktok": 0,
+        "threads": 0,
+        "youtube": 0,
+        "linkedin": 0,
+        "twitter": 0,
+        "pinterest": 0,
+    }
     for p in platforms:
         if p in counts:
             counts[p] += 1

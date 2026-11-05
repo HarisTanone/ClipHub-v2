@@ -168,7 +168,7 @@ function getPlatformColorClass(type: string) {
 
 async function fetchSocialAccounts(): Promise<any[]> {
   const token = getToken();
-  const res = await fetch(`${API_BASE}/api/social/accounts?page=1&limit=200`, {
+  const res = await fetch(`${API_BASE}/api/social/accounts?page=1&limit=100`, {
     headers: { Authorization: `Bearer ${token}` },
   });
   if (!res.ok) return [];
