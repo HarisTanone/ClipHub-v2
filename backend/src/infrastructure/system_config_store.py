@@ -10,6 +10,7 @@ Provides:
 import json
 import logging
 import sqlite3
+import time
 from typing import Any, Optional, Union
 
 from src.infrastructure.db_connection import get_dict_connection
@@ -1397,8 +1398,9 @@ _SETTING_ALIASES = {
     "CDN_ENABLED": "MINIO_ENABLED",
 }
 
-# In-memory settings cache
-_SETTINGS_CACHE: dict[str, Any] = {}
+# In-memory settings cache with TTL for multi-process safety
+_SETTINGS_CACHE: dict[str, tuple[float, Any]] = {}
+_SETTINGS_CACHE_TTL = 3.0  # seconds
 _TABLE_ENSURED = False
 
 
@@ -1462,8 +1464,11 @@ def mask_secret_value(value: str) -> str:
 def get_system_setting(key: str, default: Any = None) -> Any:
     """Get a system setting with in-memory caching and .env fallback."""
     key = _SETTING_ALIASES.get(key, key)
+    now = time.monotonic()
     if key in _SETTINGS_CACHE:
-        return _SETTINGS_CACHE[key]
+        cached_time, cached_val = _SETTINGS_CACHE[key]
+        if now - cached_time < _SETTINGS_CACHE_TTL:
+            return cached_val
 
     meta = SYSTEM_SETTINGS_METADATA.get(key)
     target_type = meta["data_type"] if meta else "string"
@@ -1477,7 +1482,7 @@ def get_system_setting(key: str, default: Any = None) -> Any:
             row = cur.fetchone()
             if row and row["value"] != "":
                 coerced = _coerce_value(row["value"], target_type)
-                _SETTINGS_CACHE[key] = coerced
+                _SETTINGS_CACHE[key] = (now, coerced)
                 return coerced
         finally:
             conn.close()
@@ -1485,7 +1490,7 @@ def get_system_setting(key: str, default: Any = None) -> Any:
         logger.warning(f"[system_config_store] DB lookup error for {key}: {exc}")
 
     fallback = meta["default"] if meta else default
-    _SETTINGS_CACHE[key] = fallback
+    _SETTINGS_CACHE[key] = (now, fallback)
     return fallback
 
 
@@ -1524,7 +1529,7 @@ def set_system_setting(key: str, value: Any, user_id: Optional[int] = None) -> b
         """, (key, val_str, category, data_type, min_role, is_secret, description, user_id))
         conn.commit()
         # Invalidate / update cache
-        _SETTINGS_CACHE[key] = _coerce_value(val_str, data_type)
+        _SETTINGS_CACHE[key] = (time.monotonic(), _coerce_value(val_str, data_type))
         logger.info(f"[system_config_store] Set {key} by user_id={user_id}")
         if key.startswith("MINIO_"):
             try:
@@ -1579,7 +1584,7 @@ def bulk_set_system_settings(updates: dict[str, Any], user_id: Optional[int] = N
                     updated_at = datetime('now'),
                     updated_by = excluded.updated_by
             """, (key, val_str, category, data_type, min_role, is_secret, description, user_id))
-            _SETTINGS_CACHE[key] = _coerce_value(val_str, data_type)
+            _SETTINGS_CACHE[key] = (time.monotonic(), _coerce_value(val_str, data_type))
             count += 1
         conn.commit()
         logger.info(f"[system_config_store] Bulk updated {count} settings by user_id={user_id}")

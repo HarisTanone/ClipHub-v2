@@ -53,9 +53,18 @@ class MinioService:
         elif endpoint_clean.startswith("https://"):
             endpoint_clean = endpoint_clean[len("https://"):]
             secure = True
+        endpoint_clean = endpoint_clean.rstrip("/")
+
+        # Automatically translate known MinIO Web Console ports to S3 API ports:
+        # e.g. Docker container console 9011 -> S3 API 9010
+        # e.g. Standard default console 9001 -> S3 API 9000
+        if endpoint_clean.endswith(":9011"):
+            endpoint_clean = endpoint_clean[:-5] + ":9010"
+        elif endpoint_clean.endswith(":9001"):
+            endpoint_clean = endpoint_clean[:-5] + ":9000"
 
         return {
-            "endpoint": endpoint_clean.rstrip("/"),
+            "endpoint": endpoint_clean,
             "access_key": str(access_key).strip(),
             "secret_key": str(secret_key).strip(),
             "bucket": str(bucket).strip() or "cliperhub",
@@ -83,9 +92,9 @@ class MinioService:
 
     @property
     def client(self) -> Minio:
-        if self._client is None:
-            cfg = self._get_config()
-
+        cfg = self._get_config()
+        if self._client is None or getattr(self, "_cached_config", None) != cfg:
+            self._cached_config = cfg
             import urllib3
             http_client = urllib3.PoolManager(
                 timeout=urllib3.Timeout(connect=5.0, read=30.0),
@@ -114,9 +123,12 @@ class MinioService:
 
     def test_connection(self) -> dict:
         """Test reachability and authentication to MinIO Object Storage."""
+        self.reset_client()
         cfg = self._get_config()
         if not cfg["endpoint"]:
-            return {"connected": False, "error": "Endpoint MinIO belum dikonfigurasi", "config": cfg}
+            return {"connected": False, "error": "Endpoint MinIO belum dikonfigurasi"}
+        if not cfg["access_key"] or not cfg["secret_key"]:
+            return {"connected": False, "error": "Access Key atau Secret Key MinIO belum diisi"}
         try:
             exists = self.client.bucket_exists(cfg["bucket"])
             return {
@@ -128,9 +140,25 @@ class MinioService:
                 "enabled": cfg["enabled"],
             }
         except Exception as e:
+            err_msg = str(e)
+            if "S3 API Requests must be made to API port" in err_msg or (":9011" in cfg["endpoint"]):
+                err_clean = (
+                    f"Port yang digunakan ({cfg['endpoint']}) adalah port MinIO Web Console. "
+                    "MinIO API memerlukan port S3 API (pada server ini port 9010). "
+                    "Silakan ubah endpoint menjadi: 100.64.5.96:9010 (tanpa http://)"
+                )
+            elif "Connection timed out" in err_msg or "ConnectTimeoutError" in err_msg:
+                err_clean = (
+                    f"Koneksi ke MinIO ({cfg['endpoint']}) timed out. "
+                    "Pastikan IP dan port dapat diakses dari server backend dan tidak terblokir firewall."
+                )
+            else:
+                err_clean = err_msg
+
+            logger.warning(f"[minio] test_connection failed: {err_clean}")
             return {
                 "connected": False,
-                "error": str(e),
+                "error": err_clean,
                 "bucket": cfg["bucket"],
                 "endpoint": cfg["endpoint"],
             }
