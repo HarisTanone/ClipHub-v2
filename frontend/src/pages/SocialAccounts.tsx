@@ -255,6 +255,48 @@ async function threadsConnect(code: string): Promise<{ accountId: string }> {
   return res.json();
 }
 
+// Twitter / X
+async function twitterAuthorize(redirect: string): Promise<{ url: string }> {
+  const token = getToken();
+  const res = await fetch(`${API_BASE}/api/social/twitter/authorize?redirect=${encodeURIComponent(redirect)}`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!res.ok) throw new Error((await res.json().catch(() => ({}))).detail || "Failed to authorize Twitter/X");
+  return res.json();
+}
+
+async function twitterConnect(code: string): Promise<{ accountId: string }> {
+  const token = getToken();
+  const res = await fetch(`${API_BASE}/api/social/twitter/connect`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+    body: JSON.stringify({ code }),
+  });
+  if (!res.ok) throw new Error((await res.json().catch(() => ({}))).detail || "Connect Twitter/X failed");
+  return res.json();
+}
+
+// Pinterest
+async function pinterestAuthorize(redirect: string): Promise<{ url: string }> {
+  const token = getToken();
+  const res = await fetch(`${API_BASE}/api/social/pinterest/authorize?redirect=${encodeURIComponent(redirect)}`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!res.ok) throw new Error((await res.json().catch(() => ({}))).detail || "Failed to authorize Pinterest");
+  return res.json();
+}
+
+async function pinterestConnect(code: string): Promise<{ accountId: string }> {
+  const token = getToken();
+  const res = await fetch(`${API_BASE}/api/social/pinterest/connect`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+    body: JSON.stringify({ code }),
+  });
+  if (!res.ok) throw new Error((await res.json().catch(() => ({}))).detail || "Connect Pinterest failed");
+  return res.json();
+}
+
 // YouTube
 async function youtubeAuthorize(redirect: string): Promise<{ url: string }> {
   const token = getToken();
@@ -1784,6 +1826,40 @@ export function SocialAccounts() {
                       connectFn={linkedinConnect}
                       entityLabel="organization"
                       entityIdField="organizationId"
+                      onConnected={loadAccounts}
+                    />
+                  </div>
+
+                  {/* Twitter / X */}
+                  <div className="flex items-center justify-between rounded-lg border border-zinc-800/70 bg-zinc-950/40 px-3 py-2 hover:border-zinc-700 transition">
+                    <div className="flex items-center gap-2">
+                      <PlatformIcon type="twitter" className="h-4 w-4" />
+                      <div>
+                        <p className="text-xs font-medium text-zinc-200">X (Twitter)</p>
+                        <p className="text-[10px] text-zinc-500">Tweets & Threads</p>
+                      </div>
+                    </div>
+                    <SimpleConnectFlow
+                      platform="twitter"
+                      authFn={twitterAuthorize}
+                      connectFn={twitterConnect}
+                      onConnected={loadAccounts}
+                    />
+                  </div>
+
+                  {/* Pinterest */}
+                  <div className="flex items-center justify-between rounded-lg border border-zinc-800/70 bg-zinc-950/40 px-3 py-2 hover:border-zinc-700 transition">
+                    <div className="flex items-center gap-2">
+                      <PlatformIcon type="pinterest" className="h-4 w-4" />
+                      <div>
+                        <p className="text-xs font-medium text-zinc-200">Pinterest</p>
+                        <p className="text-[10px] text-zinc-500">Pins & Boards</p>
+                      </div>
+                    </div>
+                    <SimpleConnectFlow
+                      platform="pinterest"
+                      authFn={pinterestAuthorize}
+                      connectFn={pinterestConnect}
                       onConnected={loadAccounts}
                     />
                   </div>

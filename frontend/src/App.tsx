@@ -62,6 +62,8 @@ export default function App() {
         <Route path="/social/threads/callback" element={<SocialCallback />} />
         <Route path="/social/youtube/callback" element={<SocialCallback />} />
         <Route path="/social/linkedin/callback" element={<SocialCallback />} />
+        <Route path="/social/twitter/callback" element={<SocialCallback />} />
+        <Route path="/social/pinterest/callback" element={<SocialCallback />} />
         <Route
           element={
             <ProtectedRoute>

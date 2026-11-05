@@ -1049,7 +1049,28 @@ export const socialApi = {
     return request<PlatformsStatusResponse>("/api/social/accounts/platforms-status");
   },
   async getAccounts(): Promise<{ docs: PlatformAccountInfo[] }> {
-    return request("/api/social/accounts?page=1&limit=100");
+    return request("/api/social/accounts?page=1&limit=200");
+  },
+  async twitterAuthorize(redirect: string): Promise<{ url: string }> {
+    return request(`/api/social/twitter/authorize?redirect=${encodeURIComponent(redirect)}`);
+  },
+  async twitterConnect(code: string): Promise<{ accountId: string }> {
+    return request("/api/social/twitter/connect", {
+      method: "POST",
+      body: JSON.stringify({ code }),
+    });
+  },
+  async pinterestAuthorize(redirect: string): Promise<{ url: string }> {
+    return request(`/api/social/pinterest/authorize?redirect=${encodeURIComponent(redirect)}`);
+  },
+  async pinterestConnect(code: string): Promise<{ accountId: string }> {
+    return request("/api/social/pinterest/connect", {
+      method: "POST",
+      body: JSON.stringify({ code }),
+    });
+  },
+  async getPinterestBoards(accountId: string): Promise<{ docs: Array<{ id: string; name: string }> }> {
+    return request(`/api/social/pinterest/boards?account_id=${encodeURIComponent(accountId)}`);
   },
   async getTikTokTrendingMusic(params?: {
     genre?: string;
@@ -1335,7 +1356,7 @@ export interface SystemConfigItem {
   key: string;
   value: any;
   raw_value?: string;
-  category: "ai_llm" | "api_keys" | "render_limits" | "vision_reframe" | "broll_effects" | "storage_cdn" | "social_publish" | string;
+  category: "ai_llm" | "api_keys" | "render_limits" | "vision_reframe" | "broll_effects" | "storage" | "social_publish" | string;
   data_type: "string" | "int" | "float" | "bool" | "json";
   min_role: "superadmin" | "editor" | "viewer";
   is_secret: boolean;
@@ -1374,6 +1395,15 @@ export const systemConfig = {
       method: "POST",
       body: JSON.stringify({ key }),
     });
+  },
+};
+
+export const minioApi = {
+  async testConnection(): Promise<{ success: boolean; data?: any; error?: string }> {
+    return request("/api/minio/test", { method: "POST" });
+  },
+  async getStatus(): Promise<{ success: boolean; data?: any; error?: string }> {
+    return request("/api/minio/status");
   },
 };
 
@@ -1819,6 +1849,11 @@ export interface InstantGeneratePayload {
   image_count?: number;
   auto_post?: boolean;
   target_account_ids?: string[];
+  music_enabled?: boolean;
+  music_id?: string;
+  music_name?: string;
+  music_artist?: string;
+  music_thumbnail?: string;
 }
 
 export const imageStudioApi = {
@@ -1861,7 +1896,17 @@ export const imageStudioApi = {
   deleteHistoryItem: (runId: number) => request<{ success: boolean; message: string }>(`/api/image-studio/history/${runId}`, {
     method: "DELETE",
   }),
-  publishToSocial: (payload: { run_id: number; account_ids: string[]; title?: string; caption?: string }) => request<{ success: boolean; status: string; details: any }>("/api/image-studio/post-social", {
+  publishToSocial: (payload: {
+    run_id: number;
+    account_ids: string[];
+    title?: string;
+    caption?: string;
+    music_enabled?: boolean;
+    music_id?: string;
+    music_name?: string;
+    music_artist?: string;
+    music_thumbnail?: string;
+  }) => request<{ success: boolean; status: string; details: any }>("/api/image-studio/post-social", {
     method: "POST",
     body: JSON.stringify(payload),
   }),

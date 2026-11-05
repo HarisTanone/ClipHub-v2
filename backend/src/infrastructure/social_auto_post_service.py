@@ -173,7 +173,7 @@ class SocialAutoPostService:
         # Fetch live accounts from Repliz
         repliz_map = {}
         try:
-            live_res = await repliz_get("/public/account?page=1&limit=100")
+            live_res = await repliz_get("/public/account?page=1&limit=200")
             if isinstance(live_res, dict) and "docs" in live_res:
                 for acc in live_res["docs"]:
                     acc_id = str(acc.get("_id") or acc.get("id") or "")
@@ -483,8 +483,8 @@ class SocialAutoPostService:
                 caption = self.extract_clip_caption(clip, platform=platform)
                 title = clip.get("hook", f"Clip #{rank}")[:100]
 
-                # Post type per platform: reel for Facebook, video for Instagram, TikTok, YouTube, Threads, LinkedIn
-                post_type = "reel" if platform == "facebook" else "video"
+                # Post type per platform: reel for Facebook (if <= 90s), video for Instagram, TikTok, YouTube, Threads, LinkedIn
+                post_type = ("reel" if clip_dur <= 90.0 else "video") if platform == "facebook" else "video"
 
                 media_item: Dict[str, Any] = {
                     "alt": title,
@@ -496,8 +496,10 @@ class SocialAutoPostService:
                     "url": video_url,
                 }
 
+                safe_title = title[:90] if platform == "tiktok" else (title[:100] if platform == "pinterest" else title)
+
                 payload = {
-                    "title": title,
+                    "title": safe_title,
                     "description": caption,
                     "topic": clip.get("topic") or (title[:50] if platform == "threads" else ""),
                     "type": post_type,
@@ -507,6 +509,8 @@ class SocialAutoPostService:
                         "isAiGenerated": False,
                         "isDraft": False,
                         "isAutoAddMusic": False,
+                        "isShareToFeed": True,
+                        "privacy": "public",
                         "coverTimestampMs": int(max(0.5, float(hook_seek)) * 1000),
                         "coverTimestamp": round(hook_seek, 2),
                         "collaborators": [],

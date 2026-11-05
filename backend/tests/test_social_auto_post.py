@@ -324,7 +324,7 @@ class TestSocialAutoPost(unittest.TestCase):
             medias=[{"url": "https://drive.google.com/test.mp4", "type": "video"}],
             accountId="680affa5ce12f2f72916f67e",
             scheduleAt="2026-08-28T15:00:00.000Z",
-            additionalInfo={"isAiGenerated": True, "tags": ["Shorts", "Viral"]},
+            additionalInfo={"isAiGenerated": False, "tags": ["Shorts", "Viral"]},
         )
 
         res = asyncio.run(create_schedule(body, _user={"id": "admin"}))
@@ -334,7 +334,7 @@ class TestSocialAutoPost(unittest.TestCase):
         self.assertEqual(called_args["title"], "Judul Video Viral")
         self.assertEqual(called_args["topic"], "Tech News")
         self.assertEqual(called_args["accountId"], "680affa5ce12f2f72916f67e")
-        self.assertTrue(called_args["additionalInfo"]["isAiGenerated"])
+        self.assertFalse(called_args["additionalInfo"]["isAiGenerated"])
         self.assertEqual(called_args["additionalInfo"]["tags"], ["Shorts", "Viral"])
 
     @patch("src.presentation.routes.social.schedule.repliz_get")

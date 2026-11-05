@@ -22,6 +22,7 @@ from src.infrastructure.social_compliance import (
     ensure_social_compliant_video,
     ensure_social_compliant_thumbnail,
     validate_social_media_constraints,
+    get_media_duration,
 )
 from src.presentation.routes.auth import get_current_user
 from src.presentation.routes.social.helpers import repliz_post
@@ -240,12 +241,16 @@ async def scale_video_audio_volume(video_path: str, volume: float = 1.0) -> str:
 
 
 
-def get_supported_post_type(requested_type: Optional[str], platform: str = "") -> str:
+def get_supported_post_type(
+    requested_type: Optional[str],
+    platform: str = "",
+    duration: Optional[float] = None,
+) -> str:
     """Normalize post type to comply with Repliz official Supported Post Types specification.
     
     Repliz Documentation Matrix:
-    - Facebook: text, image, video, reel, album, link, story
-    - Instagram: image, video, album, story (NO 'reel')
+    - Facebook: text, image, video, reel, album, link, story (Reel max 90s, video up to 4h)
+    - Instagram: image, video, album, story (In Repliz, video & reel both publish as Reel)
     - TikTok: image, video, album (NO 'reel', NO 'story')
     - YouTube: video (NO 'reel', NO 'story')
     - Threads: text, image, video, album
@@ -255,7 +260,13 @@ def get_supported_post_type(requested_type: Optional[str], platform: str = "") -
     req = (requested_type or "video").lower().strip()
 
     if plat == "facebook":
-        if req in ("text", "image", "video", "reel", "album", "link", "story"):
+        if req == "reel":
+            # Facebook Reels duration must be between 3 and 90 seconds
+            if duration is not None and duration > 90.0:
+                logger.info(f"Video duration ({duration:.1f}s) > 90s: switching Facebook post type from 'reel' to 'video'")
+                return "video"
+            return "reel"
+        if req in ("text", "image", "video", "album", "link", "story"):
             return req
         return "video"
     elif plat == "instagram":
@@ -346,13 +357,15 @@ async def publish_clip(body: PublishRequest, _user=Depends(get_current_user)):
 
     # 2. Check credentials
     from src.infrastructure.social_compliance import resolve_public_media_base_url
+    from src.infrastructure.minio_service import get_minio_service
 
     public_base = resolve_public_media_base_url()
+    minio_svc = get_minio_service()
 
-    if not public_base and not gdrive_uploader.is_configured:
+    if not public_base and not gdrive_uploader.is_configured and not (minio_svc.is_configured and minio_svc.is_enabled):
         raise HTTPException(
             status_code=503,
-            detail="Media URL host belum dikonfigurasi. Pastikan AUTOCLIPER_PUBLIC_URL atau Google Drive sudah terisi.",
+            detail="Media URL host belum dikonfigurasi. Pastikan AUTOCLIPER_PUBLIC_URL, MinIO, atau Google Drive sudah terisi.",
         )
     if not settings.REPLIZ_ACCESS_KEY or not settings.REPLIZ_SECRET_KEY:
         raise HTTPException(
@@ -436,7 +449,9 @@ async def publish_clip(body: PublishRequest, _user=Depends(get_current_user)):
     mixed_artifact = None
 
     # 4a. Programmatic duration and format validation check (Mandatory TikTok/Meta API requirement)
+    video_duration = None
     if os.path.exists(compliant_video):
+        video_duration = get_media_duration(compliant_video)
         is_valid, constraint_err = validate_social_media_constraints(
             compliant_video, platform="tiktok"
         )
@@ -498,6 +513,38 @@ async def publish_clip(body: PublishRequest, _user=Depends(get_current_user)):
             clip_rank = body.clipRank or 1
             video_url = f"{public_base}/api/jobs/{body.jobId}/clips/{clip_rank}/final"
             thumb_url = f"{public_base}/api/jobs/{body.jobId}/clips/{clip_rank}/thumb"
+    elif minio_svc.is_configured and minio_svc.is_enabled:
+        try:
+            minio_res = minio_svc.upload_clip(
+                job_id=body.jobId,
+                clip_rank=body.clipRank or 1,
+                file_path=compliant_video,
+            )
+            video_url = minio_res.get("presigned_url") or minio_res.get("url")
+            if comp_thumb and os.path.exists(comp_thumb):
+                try:
+                    thumb_obj = f"job_{body.jobId}/thumb.jpg"
+                    minio_svc.client.fput_object(
+                        minio_svc.bucket,
+                        thumb_obj,
+                        comp_thumb,
+                        content_type="image/jpeg",
+                    )
+                    thumb_url = minio_svc.get_presigned_url(thumb_obj, expires_hours=24)
+                except Exception as te:
+                    logger.warning(f"MinIO thumb upload failed: {te}")
+        except Exception as me:
+            logger.error(f"MinIO upload failed in social publish: {me}")
+            if gdrive_uploader.is_configured:
+                try:
+                    drive_result = gdrive_uploader.upload_video(
+                        compliant_video, filename=upload_filename
+                    )
+                    video_url = drive_result.get("direct_link") or drive_result.get("web_view_link")
+                except Exception as e:
+                    raise HTTPException(status_code=502, detail=f"MinIO dan Google Drive gagal upload: {me} | {e}")
+            else:
+                raise HTTPException(status_code=502, detail=f"MinIO upload gagal: {me}")
     elif gdrive_uploader.is_configured:
         try:
             drive_result = gdrive_uploader.upload_video(
@@ -522,7 +569,7 @@ async def publish_clip(body: PublishRequest, _user=Depends(get_current_user)):
     if not video_url:
         raise HTTPException(
             status_code=502,
-            detail="Gagal mendapatkan URL publik untuk file video (AUTOCLIPER_PUBLIC_URL atau Google Drive).",
+            detail="Gagal mendapatkan URL publik untuk file video (AUTOCLIPER_PUBLIC_URL, MinIO, atau Google Drive).",
         )
 
     # 5. Extract hashtags for tags if tags list is empty
@@ -604,7 +651,7 @@ async def publish_clip(body: PublishRequest, _user=Depends(get_current_user)):
     for acc_id in target_account_ids:
         try:
             platform = account_platform_map.get(acc_id, "")
-            post_type = get_supported_post_type(body.type, platform)
+            post_type = get_supported_post_type(body.type, platform, duration=video_duration)
             has_selected_music = selected_music and platform.lower().strip() == "tiktok"
             requested_volume = {
                 "video": int(round(
@@ -634,9 +681,11 @@ async def publish_clip(body: PublishRequest, _user=Depends(get_current_user)):
             # but for now we follow the existing has_selected_music check.
             # Ensure isAutoAddMusic respects the client's request.
             additional_info = {
-                "isAiGenerated": bool(body.isAiGenerated),
+                "isAiGenerated": False,
                 "isDraft": bool(body.isDraft),
                 "isAutoAddMusic": bool(body.isAutoAddMusic),
+                "isShareToFeed": True,
+                "privacy": "public",
                 "coverTimestampMs": int(max(0.5, float(hook_seek)) * 1000),
                 "coverTimestamp": round(hook_seek, 2),
                 "collaborators": body.collaborators or [],
@@ -647,8 +696,15 @@ async def publish_clip(body: PublishRequest, _user=Depends(get_current_user)):
                 "targetCountries": body.targetCountries or [],
             }
 
+            # Platform specific title formatting per Repliz Swagger guidelines
+            safe_title = post_title
+            if platform.lower().strip() == "tiktok":
+                safe_title = post_title[:90]
+            elif platform.lower().strip() == "pinterest":
+                safe_title = post_title[:100]
+
             payload = {
-                "title": post_title,
+                "title": safe_title,
                 "description": post_desc,
                 "topic": body.topic or "",
                 "type": post_type,

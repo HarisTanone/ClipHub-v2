@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import {
   Sparkles,
   Image as ImageIcon,
@@ -29,6 +29,12 @@ import {
   RotateCcw,
   Database,
   BookOpen,
+  ChevronLeft,
+  ChevronRight,
+  Pause,
+  Search,
+  Volume2,
+  Music2,
 } from "lucide-react";
 import { useAuth } from "@/hooks/useAuth";
 import { PlatformIcon } from "@/components/social/PlatformIcon";
@@ -42,6 +48,7 @@ import {
   AccentColorPreset,
   ImageStudioRun,
   PlatformAccountInfo,
+  TikTokMusicTrack,
   API_BASE,
 } from "@/lib/api";
 import { cn } from "@/lib/utils";
@@ -130,10 +137,32 @@ export function GeneratedImagesPage() {
 
   // Preview & Result State
   const [latestResult, setLatestResult] = useState<any | null>(null);
+  const [activeSlideIndex, setActiveSlideIndex] = useState<number>(0);
+  const [historySlideIndices, setHistorySlideIndices] = useState<Record<number, number>>({});
   const [selectedRunForSocial, setSelectedRunForSocial] = useState<ImageStudioRun | null>(null);
   const [socialModalOpen, setSocialModalOpen] = useState<boolean>(false);
   const [publishingSocial, setPublishingSocial] = useState<boolean>(false);
   const [publishSuccessMessage, setPublishSuccessMessage] = useState<string>("");
+
+  // Instant Studio Music State
+  const [musicEnabledInstant, setMusicEnabledInstant] = useState<boolean>(false);
+  const [musicModeInstant, setMusicModeInstant] = useState<"auto" | "custom">("auto");
+  const [selectedTrackInstant, setSelectedTrackInstant] = useState<TikTokMusicTrack | null>(null);
+  const [instantMusicSearch, setInstantMusicSearch] = useState<string>("");
+  const [instantMusicTracks, setInstantMusicTracks] = useState<TikTokMusicTrack[]>([]);
+  const [loadingInstantMusic, setLoadingInstantMusic] = useState<boolean>(false);
+
+  // Social Modal Music State
+  const [modalMusicEnabled, setModalMusicEnabled] = useState<boolean>(false);
+  const [modalMusicMode, setModalMusicMode] = useState<"auto" | "custom">("auto");
+  const [modalSelectedTrack, setModalSelectedTrack] = useState<TikTokMusicTrack | null>(null);
+  const [modalMusicSearch, setModalMusicSearch] = useState<string>("");
+  const [modalMusicTracks, setModalMusicTracks] = useState<TikTokMusicTrack[]>([]);
+  const [loadingModalMusic, setLoadingModalMusic] = useState<boolean>(false);
+
+  // Shared Audio Preview Player
+  const [playingTrackId, setPlayingTrackId] = useState<string | null>(null);
+  const audioPlayerRef = useRef<HTMLAudioElement | null>(null);
 
   // New Topic & Slot inputs for Automation tab
   const [newTopicInput, setNewTopicInput] = useState<string>("");
@@ -254,9 +283,77 @@ export function GeneratedImagesPage() {
     }
   };
 
+  // Audio demo cleanup
+  useEffect(() => {
+    return () => {
+      if (audioPlayerRef.current) {
+        audioPlayerRef.current.pause();
+        audioPlayerRef.current = null;
+      }
+    };
+  }, []);
+
+  const togglePlayAudio = (track: TikTokMusicTrack, e?: React.MouseEvent) => {
+    e?.stopPropagation();
+    if (playingTrackId === track.id) {
+      if (audioPlayerRef.current) {
+        audioPlayerRef.current.pause();
+      }
+      setPlayingTrackId(null);
+    } else {
+      if (audioPlayerRef.current) {
+        audioPlayerRef.current.pause();
+      }
+      const audio = new Audio(track.url);
+      audio.volume = 0.5;
+      audio.onended = () => setPlayingTrackId(null);
+      audio.onerror = () => setPlayingTrackId(null);
+      audio.play().catch(() => setPlayingTrackId(null));
+      audioPlayerRef.current = audio;
+      setPlayingTrackId(track.id);
+    }
+  };
+
+  const loadInstantMusicTracks = async (query?: string) => {
+    setLoadingInstantMusic(true);
+    try {
+      const res = await socialApi.getTikTokTrendingMusic({
+        search: query?.trim() || undefined,
+        limit: 20,
+        country_code: "ID",
+      });
+      if (res && res.tracks) {
+        setInstantMusicTracks(res.tracks);
+      }
+    } catch (err) {
+      console.warn("Failed to fetch TikTok music tracks:", err);
+    } finally {
+      setLoadingInstantMusic(false);
+    }
+  };
+
+  const loadModalMusicTracks = async (query?: string) => {
+    setLoadingModalMusic(true);
+    try {
+      const res = await socialApi.getTikTokTrendingMusic({
+        search: query?.trim() || undefined,
+        limit: 20,
+        country_code: "ID",
+      });
+      if (res && res.tracks) {
+        setModalMusicTracks(res.tracks);
+      }
+    } catch (err) {
+      console.warn("Failed to fetch TikTok music tracks for modal:", err);
+    } finally {
+      setLoadingModalMusic(false);
+    }
+  };
+
   const handleInstantGenerate = async () => {
     setGenerating(true);
     setLatestResult(null);
+    setActiveSlideIndex(0);
     try {
       const res = await imageStudioApi.generateInstant({
         topic,
@@ -276,9 +373,15 @@ export function GeneratedImagesPage() {
         image_count: imageCount,
         auto_post: autoPostInstant,
         target_account_ids: selectedAccountIds,
+        music_enabled: musicEnabledInstant,
+        music_id: musicModeInstant === "custom" && selectedTrackInstant ? selectedTrackInstant.id : undefined,
+        music_name: musicModeInstant === "custom" && selectedTrackInstant ? selectedTrackInstant.name : undefined,
+        music_artist: musicModeInstant === "custom" && selectedTrackInstant ? selectedTrackInstant.artist : undefined,
+        music_thumbnail: musicModeInstant === "custom" && selectedTrackInstant ? selectedTrackInstant.thumbnail : undefined,
       });
       if (res.success && res.data) {
         setLatestResult(res.data);
+        setActiveSlideIndex(0);
         // Refresh history
         const hRes = await imageStudioApi.getHistory();
         if (hRes.success) setHistory(hRes.data);
@@ -298,6 +401,7 @@ export function GeneratedImagesPage() {
       });
       if (res.success && res.data) {
         setLatestResult(res.data);
+        setActiveSlideIndex(0);
         const hRes = await imageStudioApi.getHistory();
         if (hRes.success) setHistory(hRes.data);
       }
@@ -346,6 +450,13 @@ export function GeneratedImagesPage() {
     setSelectedRunForSocial(run);
     setSocialModalOpen(true);
     setPublishSuccessMessage("");
+    setModalMusicEnabled(Boolean(run.social_details?.music_enabled || false));
+    setModalMusicMode("auto");
+    setModalSelectedTrack(null);
+    if (audioPlayerRef.current) {
+      audioPlayerRef.current.pause();
+      setPlayingTrackId(null);
+    }
   };
 
   const handlePublishFromModal = async () => {
@@ -357,6 +468,11 @@ export function GeneratedImagesPage() {
         account_ids: selectedAccountIds,
         title: selectedRunForSocial.topic,
         caption: `${selectedRunForSocial.quote_headline}\n\n${selectedRunForSocial.quote_body}`,
+        music_enabled: modalMusicEnabled,
+        music_id: modalMusicMode === "custom" && modalSelectedTrack ? modalSelectedTrack.id : undefined,
+        music_name: modalMusicMode === "custom" && modalSelectedTrack ? modalSelectedTrack.name : undefined,
+        music_artist: modalMusicMode === "custom" && modalSelectedTrack ? modalSelectedTrack.artist : undefined,
+        music_thumbnail: modalMusicMode === "custom" && modalSelectedTrack ? modalSelectedTrack.thumbnail : undefined,
       });
       if (res.success) {
         setPublishSuccessMessage("Post berhasil dijadwalkan ke akun media sosial terpilih.");
@@ -1015,6 +1131,212 @@ export function GeneratedImagesPage() {
                   </div>
                 )}
               </div>
+
+              {/* Music Section for Social Post (TikTok, Instagram, Facebook) */}
+              <div className="pt-3 border-t border-zinc-800/80 space-y-3">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <Music className="h-4 w-4 text-purple-400" />
+                    <div>
+                      <span className="text-xs font-semibold text-zinc-200 block">
+                        Musik Latar (TikTok, Instagram, Facebook)
+                      </span>
+                      <span className="text-[10px] text-zinc-500">
+                        Disinkronkan otomatis melalui Repliz Gold API
+                      </span>
+                    </div>
+                  </div>
+                  <label className="relative inline-flex items-center cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={musicEnabledInstant}
+                      onChange={(e) => {
+                        const val = e.target.checked;
+                        setMusicEnabledInstant(val);
+                        if (val && instantMusicTracks.length === 0) {
+                          loadInstantMusicTracks();
+                        }
+                        if (!val && audioPlayerRef.current) {
+                          audioPlayerRef.current.pause();
+                          setPlayingTrackId(null);
+                        }
+                      }}
+                      className="sr-only peer"
+                    />
+                    <div className="w-9 h-5 bg-zinc-800 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-zinc-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-purple-600"></div>
+                  </label>
+                </div>
+
+                {musicEnabledInstant && (
+                  <div className="rounded-xl border border-zinc-800 bg-zinc-900/60 p-3 space-y-3">
+                    {/* Mode selection: Auto vs Custom TikTok track */}
+                    <div className="grid grid-cols-2 gap-2">
+                      <button
+                        type="button"
+                        onClick={() => setMusicModeInstant("auto")}
+                        className={cn(
+                          "flex items-center justify-center gap-1.5 py-2 px-3 rounded-lg border text-xs font-medium transition-all",
+                          musicModeInstant === "auto"
+                            ? "border-purple-500 bg-purple-500/15 text-purple-200 ring-1 ring-purple-500/30"
+                            : "border-zinc-800 bg-zinc-900 text-zinc-400 hover:text-zinc-200"
+                        )}
+                      >
+                        <Sparkles className="h-3.5 w-3.5 text-purple-400" />
+                        <span>Otomatis Trending</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setMusicModeInstant("custom");
+                          if (instantMusicTracks.length === 0) loadInstantMusicTracks();
+                        }}
+                        className={cn(
+                          "flex items-center justify-center gap-1.5 py-2 px-3 rounded-lg border text-xs font-medium transition-all",
+                          musicModeInstant === "custom"
+                            ? "border-purple-500 bg-purple-500/15 text-purple-200 ring-1 ring-purple-500/30"
+                            : "border-zinc-800 bg-zinc-900 text-zinc-400 hover:text-zinc-200"
+                        )}
+                      >
+                        <Music2 className="h-3.5 w-3.5 text-purple-400" />
+                        <span>Pilih Lagu TikTok</span>
+                      </button>
+                    </div>
+
+                    {musicModeInstant === "auto" ? (
+                      <p className="text-[11px] text-zinc-400 bg-purple-500/5 border border-purple-500/20 rounded-lg p-2.5">
+                        Platform (TikTok &amp; Instagram) akan secara otomatis memilih sound musik yang sedang viral dan relevan untuk visual album Anda.
+                      </p>
+                    ) : (
+                      <div className="space-y-2.5">
+                        {/* Selected Track Banner */}
+                        {selectedTrackInstant ? (
+                          <div className="flex items-center justify-between p-2.5 rounded-lg border border-purple-500/30 bg-purple-500/10">
+                            <div className="flex items-center gap-2.5 min-w-0">
+                              {selectedTrackInstant.thumbnail ? (
+                                <img
+                                  src={selectedTrackInstant.thumbnail}
+                                  alt=""
+                                  className="h-9 w-9 rounded-md object-cover border border-purple-500/40 shrink-0"
+                                />
+                              ) : (
+                                <div className="h-9 w-9 rounded-md bg-purple-900/50 border border-purple-500/40 flex items-center justify-center shrink-0">
+                                  <Music className="h-4 w-4 text-purple-300" />
+                                </div>
+                              )}
+                              <div className="min-w-0">
+                                <p className="text-xs font-semibold text-purple-200 truncate">{selectedTrackInstant.name}</p>
+                                <p className="text-[10px] text-purple-300/80 truncate">{selectedTrackInstant.artist}</p>
+                              </div>
+                            </div>
+                            <div className="flex items-center gap-1.5 shrink-0">
+                              <button
+                                type="button"
+                                onClick={(e) => togglePlayAudio(selectedTrackInstant, e)}
+                                className="p-1.5 rounded-md bg-purple-500/20 hover:bg-purple-500/40 text-purple-300 transition-colors"
+                                title="Putar Demo"
+                              >
+                                {playingTrackId === selectedTrackInstant.id ? (
+                                  <Pause className="h-3.5 w-3.5" />
+                                ) : (
+                                  <Play className="h-3.5 w-3.5" />
+                                )}
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => setSelectedTrackInstant(null)}
+                                className="p-1.5 rounded-md bg-zinc-800 hover:bg-zinc-700 text-zinc-400 hover:text-zinc-200 text-[10px] transition-colors"
+                              >
+                                Ganti
+                              </button>
+                            </div>
+                          </div>
+                        ) : (
+                          <>
+                            {/* Search input */}
+                            <div className="relative">
+                              <input
+                                type="text"
+                                value={instantMusicSearch}
+                                onChange={(e) => setInstantMusicSearch(e.target.value)}
+                                onKeyDown={(e) => {
+                                  if (e.key === "Enter") {
+                                    e.preventDefault();
+                                    loadInstantMusicTracks(instantMusicSearch);
+                                  }
+                                }}
+                                placeholder="Cari judul lagu / artis TikTok..."
+                                className="w-full rounded-lg bg-zinc-950 border border-zinc-800 pl-8 pr-3 py-1.5 text-xs text-zinc-200 placeholder-zinc-600 focus:outline-none focus:border-purple-500"
+                              />
+                              <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-zinc-500" />
+                            </div>
+
+                            {/* Track list */}
+                            <div className="max-h-48 overflow-y-auto space-y-1 pr-1">
+                              {loadingInstantMusic ? (
+                                <div className="py-6 text-center text-xs text-zinc-500 flex items-center justify-center gap-2">
+                                  <RefreshCw className="h-3.5 w-3.5 animate-spin" />
+                                  <span>Memuat track TikTok...</span>
+                                </div>
+                              ) : instantMusicTracks.length === 0 ? (
+                                <div className="py-4 text-center text-xs text-zinc-500">
+                                  Tidak ada track ditemukan. Tekan Enter untuk mencari.
+                                </div>
+                              ) : (
+                                instantMusicTracks.map((track) => (
+                                  <div
+                                    key={track.id}
+                                    onClick={() => setSelectedTrackInstant(track)}
+                                    className="flex items-center justify-between p-2 rounded-lg border border-zinc-800/80 bg-zinc-950/60 hover:border-zinc-700 hover:bg-zinc-850 cursor-pointer transition-all"
+                                  >
+                                    <div className="flex items-center gap-2 min-w-0">
+                                      {track.thumbnail ? (
+                                        <img
+                                          src={track.thumbnail}
+                                          alt=""
+                                          className="h-8 w-8 rounded object-cover shrink-0"
+                                        />
+                                      ) : (
+                                        <div className="h-8 w-8 rounded bg-zinc-800 flex items-center justify-center shrink-0">
+                                          <Music className="h-3.5 w-3.5 text-zinc-400" />
+                                        </div>
+                                      )}
+                                      <div className="min-w-0">
+                                        <p className="text-xs font-medium text-zinc-200 truncate">{track.name}</p>
+                                        <p className="text-[10px] text-zinc-500 truncate">{track.artist}</p>
+                                      </div>
+                                    </div>
+                                    <div className="flex items-center gap-1.5 shrink-0 ml-2">
+                                      <button
+                                        type="button"
+                                        onClick={(e) => togglePlayAudio(track, e)}
+                                        className="p-1 rounded bg-zinc-800 hover:bg-zinc-700 text-zinc-300 transition-colors"
+                                        title="Dengar Demo"
+                                      >
+                                        {playingTrackId === track.id ? (
+                                          <Pause className="h-3 w-3" />
+                                        ) : (
+                                          <Play className="h-3 w-3" />
+                                        )}
+                                      </button>
+                                      <button
+                                        type="button"
+                                        onClick={() => setSelectedTrackInstant(track)}
+                                        className="px-2 py-1 rounded bg-purple-600/80 hover:bg-purple-600 text-white text-[10px] font-medium transition-colors"
+                                      >
+                                        Pilih
+                                      </button>
+                                    </div>
+                                  </div>
+                                ))
+                              )}
+                            </div>
+                          </>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
             </div>
 
             {/* Action Button */}
@@ -1045,8 +1367,8 @@ export function GeneratedImagesPage() {
 
               {latestResult ? (
                 <div className="space-y-4">
-                  {/* Media Viewer */}
-                  <div className="relative rounded-xl overflow-hidden border border-zinc-800 bg-black flex items-center justify-center max-h-[520px]">
+                  {/* Media Viewer with Carousel Slider */}
+                  <div className="relative rounded-xl overflow-hidden border border-zinc-800 bg-black flex items-center justify-center min-h-[360px] max-h-[520px] select-none">
                     {latestResult.video_url ? (
                       <video
                         src={formatMediaUrl(latestResult.video_url)}
@@ -1054,36 +1376,200 @@ export function GeneratedImagesPage() {
                         className="w-full h-auto max-h-[520px] object-contain"
                       />
                     ) : (
-                      <img
-                        src={formatMediaUrl(latestResult.image_urls?.[0])}
-                        alt="Preview"
-                        className="w-full h-auto max-h-[520px] object-contain"
-                      />
+                      <>
+                        <img
+                          src={formatMediaUrl(
+                            (latestResult.image_urls && latestResult.image_urls[activeSlideIndex]) ||
+                              latestResult.image_urls?.[0]
+                          )}
+                          alt={`Preview ${activeSlideIndex + 1}`}
+                          className="w-full h-auto max-h-[520px] object-contain transition-opacity duration-200"
+                        />
+
+                        {/* Top Badge: Slide Counter / Album tag */}
+                        {latestResult.image_urls && latestResult.image_urls.length > 1 && (
+                          <div className="absolute top-3 right-3 flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-black/75 backdrop-blur-md text-white text-[11px] font-semibold border border-white/15 shadow-xl z-10">
+                            <Layers className="h-3 w-3 text-purple-400" />
+                            <span>Foto {activeSlideIndex + 1} dari {latestResult.image_urls.length}</span>
+                          </div>
+                        )}
+
+                        {/* Prev Button */}
+                        {latestResult.image_urls && latestResult.image_urls.length > 1 && (
+                          <button
+                            type="button"
+                            onClick={() =>
+                              setActiveSlideIndex(
+                                (prev) => (prev - 1 + latestResult.image_urls.length) % latestResult.image_urls.length
+                              )
+                            }
+                            className="absolute left-3 top-1/2 -translate-y-1/2 h-9 w-9 rounded-full bg-black/60 hover:bg-black/85 text-white flex items-center justify-center backdrop-blur-sm border border-white/20 shadow-xl transition-all hover:scale-105 active:scale-95 z-10"
+                            aria-label="Foto Sebelumnya"
+                          >
+                            <ChevronLeft className="h-5 w-5" />
+                          </button>
+                        )}
+
+                        {/* Next Button */}
+                        {latestResult.image_urls && latestResult.image_urls.length > 1 && (
+                          <button
+                            type="button"
+                            onClick={() =>
+                              setActiveSlideIndex((prev) => (prev + 1) % latestResult.image_urls.length)
+                            }
+                            className="absolute right-3 top-1/2 -translate-y-1/2 h-9 w-9 rounded-full bg-black/60 hover:bg-black/85 text-white flex items-center justify-center backdrop-blur-sm border border-white/20 shadow-xl transition-all hover:scale-105 active:scale-95 z-10"
+                            aria-label="Foto Berikutnya"
+                          >
+                            <ChevronRight className="h-5 w-5" />
+                          </button>
+                        )}
+
+                        {/* Indicator Dots inside image */}
+                        {latestResult.image_urls && latestResult.image_urls.length > 1 && (
+                          <div className="absolute bottom-3 left-0 right-0 flex justify-center items-center gap-1.5 z-10">
+                            {latestResult.image_urls.map((_: string, idx: number) => (
+                              <button
+                                key={idx}
+                                type="button"
+                                onClick={() => setActiveSlideIndex(idx)}
+                                className={cn(
+                                  "transition-all rounded-full h-1.5",
+                                  activeSlideIndex === idx
+                                    ? "w-6 bg-purple-500 shadow-md shadow-purple-500/50"
+                                    : "w-1.5 bg-white/40 hover:bg-white/70"
+                                )}
+                                aria-label={`Pindah ke foto ${idx + 1}`}
+                              />
+                            ))}
+                          </div>
+                        )}
+                      </>
                     )}
                   </div>
 
+                  {/* Thumbnail Filmstrip Carousel for Multi-Image */}
+                  {latestResult.image_urls && latestResult.image_urls.length > 1 && (
+                    <div className="space-y-1.5 pt-1">
+                      <div className="flex items-center justify-between text-[11px] text-zinc-400">
+                        <span className="font-medium">Semua Foto Album ({latestResult.image_urls.length} Foto):</span>
+                        <span className="text-zinc-500">Klik untuk memilih slide</span>
+                      </div>
+                      <div className="flex items-center gap-2 overflow-x-auto pb-1.5 pt-0.5 scrollbar-thin">
+                        {latestResult.image_urls.map((url: string, idx: number) => (
+                          <button
+                            key={idx}
+                            type="button"
+                            onClick={() => setActiveSlideIndex(idx)}
+                            className={cn(
+                              "relative shrink-0 rounded-lg overflow-hidden border-2 transition-all",
+                              activeSlideIndex === idx
+                                ? "border-purple-500 ring-2 ring-purple-500/40 shadow-lg scale-105"
+                                : "border-zinc-800 opacity-60 hover:opacity-100 hover:border-zinc-700"
+                            )}
+                          >
+                            <img
+                              src={formatMediaUrl(url)}
+                              alt={`Thumbnail ${idx + 1}`}
+                              className="h-16 w-12 object-cover"
+                            />
+                            <span className="absolute bottom-1 right-1 px-1 py-0.2 rounded bg-black/80 text-[9px] font-mono text-zinc-200">
+                              #{idx + 1}
+                            </span>
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
                   {/* Actions for Latest Result */}
-                  <div className="flex items-center gap-2">
-                    <a
-                      href={formatMediaUrl(latestResult.video_url || latestResult.image_urls?.[0])}
-                      download="visual_post.png"
-                      className="flex-1 flex items-center justify-center gap-1.5 py-2 px-3 rounded-xl bg-zinc-800 hover:bg-zinc-700 text-xs font-medium text-zinc-200 transition-colors"
-                    >
-                      <Download className="h-3.5 w-3.5" />
-                      <span>Download HD</span>
-                    </a>
+                  <div className="space-y-2 pt-1">
+                    <div className="flex items-center gap-2">
+                      <a
+                        href={formatMediaUrl(
+                          latestResult.video_url ||
+                            (latestResult.image_urls && latestResult.image_urls[activeSlideIndex]) ||
+                            latestResult.image_urls?.[0]
+                        )}
+                        download={`visual_post_${activeSlideIndex + 1}.png`}
+                        className="flex-1 flex items-center justify-center gap-1.5 py-2 px-3 rounded-xl bg-zinc-800 hover:bg-zinc-700 text-xs font-medium text-zinc-200 transition-colors"
+                      >
+                        <Download className="h-3.5 w-3.5" />
+                        <span>Download #{activeSlideIndex + 1}</span>
+                      </a>
+                      {latestResult.image_urls && latestResult.image_urls.length > 1 && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            latestResult.image_urls.forEach((u: string, i: number) => {
+                              const a = document.createElement("a");
+                              a.href = formatMediaUrl(u);
+                              a.download = `visual_album_${i + 1}.png`;
+                              document.body.appendChild(a);
+                              a.click();
+                              document.body.removeChild(a);
+                            });
+                          }}
+                          className="flex items-center justify-center gap-1.5 py-2 px-3 rounded-xl bg-zinc-800 hover:bg-zinc-700 text-xs font-medium text-zinc-200 transition-colors"
+                          title="Download semua foto sekaligus"
+                        >
+                          <Download className="h-3.5 w-3.5 text-purple-400" />
+                          <span>Unduh Semua ({latestResult.image_urls.length})</span>
+                        </button>
+                      )}
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const currentUrl =
+                            latestResult.video_url ||
+                            (latestResult.image_urls && latestResult.image_urls[activeSlideIndex]) ||
+                            latestResult.image_urls?.[0];
+                          navigator.clipboard.writeText(formatMediaUrl(currentUrl));
+                          alert("URL media disalin ke clipboard!");
+                        }}
+                        className="flex items-center justify-center gap-1.5 py-2 px-3 rounded-xl bg-zinc-800 hover:bg-zinc-700 text-xs font-medium text-zinc-200 transition-colors"
+                      >
+                        <Copy className="h-3.5 w-3.5" />
+                        <span>Salin URL</span>
+                      </button>
+                    </div>
+
+                    {/* Direct Social Post Button for This Session Result */}
                     <button
                       type="button"
                       onClick={() => {
-                        navigator.clipboard.writeText(
-                          formatMediaUrl(latestResult.video_url || latestResult.image_urls?.[0])
-                        );
-                        alert("URL gambar disalin ke clipboard!");
+                        const runObj: ImageStudioRun = {
+                          id: latestResult.id || 0,
+                          user_id: user?.id || 0,
+                          run_date: new Date().toISOString().split("T")[0],
+                          session_name: latestResult.session_name || "Instant Studio",
+                          topic: latestResult.topic || topic,
+                          prompt: latestResult.prompt || prompt,
+                          quote_hook: latestResult.quote_hook || quoteHook,
+                          quote_headline: latestResult.quote_headline || quoteHeadline,
+                          quote_body: latestResult.quote_body || quoteBody,
+                          quote_author: latestResult.quote_author || quoteAuthor,
+                          quote_handle: latestResult.quote_handle || quoteHandle,
+                          media_type: latestResult.media_type || mediaType,
+                          template_preset: latestResult.template || selectedTemplate,
+                          font_name: latestResult.font || selectedFont,
+                          aspect_ratio: latestResult.aspect_ratio || aspectRatio,
+                          image_urls: latestResult.image_urls || [],
+                          video_url: latestResult.video_url || null,
+                          social_post_status: latestResult.social_post_status || "pending",
+                          social_details: latestResult.social_details || null,
+                          trigger_source: "instant_studio",
+                          created_at: new Date().toISOString(),
+                        };
+                        handleOpenSocialModal(runObj);
                       }}
-                      className="flex items-center justify-center gap-1.5 py-2 px-3 rounded-xl bg-zinc-800 hover:bg-zinc-700 text-xs font-medium text-zinc-200 transition-colors"
+                      className="w-full flex items-center justify-center gap-2 py-2.5 px-4 rounded-xl bg-purple-600 hover:bg-purple-500 text-white text-xs font-semibold shadow-md shadow-purple-600/20 transition-colors"
                     >
-                      <Copy className="h-3.5 w-3.5" />
-                      <span>Salin URL</span>
+                      <Share2 className="h-3.5 w-3.5" />
+                      <span>
+                        {latestResult.image_urls && latestResult.image_urls.length > 1
+                          ? `Posting Album ke Media Sosial (${latestResult.image_urls.length} Foto)`
+                          : "Posting ke Media Sosial"}
+                      </span>
                     </button>
                   </div>
                 </div>
@@ -1469,7 +1955,7 @@ export function GeneratedImagesPage() {
                   key={run.id}
                   className="rounded-2xl border border-zinc-800 bg-[#0e0e12] overflow-hidden flex flex-col justify-between"
                 >
-                  <div className="relative aspect-[9/16] bg-black max-h-[380px] overflow-hidden">
+                  <div className="relative aspect-[9/16] bg-black max-h-[380px] overflow-hidden select-none">
                     {run.video_url ? (
                       <video
                         src={formatMediaUrl(run.video_url)}
@@ -1477,13 +1963,77 @@ export function GeneratedImagesPage() {
                         className="w-full h-full object-cover"
                       />
                     ) : (
-                      <img
-                        src={formatMediaUrl(run.image_urls?.[0])}
-                        alt={run.topic}
-                        className="w-full h-full object-cover"
-                      />
+                      <>
+                        <img
+                          src={formatMediaUrl(
+                            run.image_urls?.[historySlideIndices[run.id] || 0] || run.image_urls?.[0]
+                          )}
+                          alt={run.topic}
+                          className="w-full h-full object-cover transition-opacity duration-150"
+                        />
+
+                        {/* Slide badge if album */}
+                        {run.image_urls && run.image_urls.length > 1 && (
+                          <div className="absolute top-2.5 right-2.5 z-10">
+                            <span className="px-2 py-0.5 rounded-md text-[10px] font-semibold bg-purple-900/80 backdrop-blur-sm text-purple-200 border border-purple-500/30 flex items-center gap-1">
+                              <Layers className="h-3 w-3" />
+                              <span>Album {(historySlideIndices[run.id] || 0) + 1}/{run.image_urls.length}</span>
+                            </span>
+                          </div>
+                        )}
+
+                        {/* Prev/Next arrows on Card */}
+                        {run.image_urls && run.image_urls.length > 1 && (
+                          <>
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setHistorySlideIndices((prev) => {
+                                  const cur = prev[run.id] || 0;
+                                  const total = run.image_urls.length;
+                                  return { ...prev, [run.id]: (cur - 1 + total) % total };
+                                });
+                              }}
+                              className="absolute left-1.5 top-1/2 -translate-y-1/2 h-7 w-7 rounded-full bg-black/65 hover:bg-black/90 text-white flex items-center justify-center backdrop-blur-sm border border-white/20 transition-all z-10"
+                              aria-label="Foto Sebelumnya"
+                            >
+                              <ChevronLeft className="h-4 w-4" />
+                            </button>
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setHistorySlideIndices((prev) => {
+                                  const cur = prev[run.id] || 0;
+                                  const total = run.image_urls.length;
+                                  return { ...prev, [run.id]: (cur + 1) % total };
+                                });
+                              }}
+                              className="absolute right-1.5 top-1/2 -translate-y-1/2 h-7 w-7 rounded-full bg-black/65 hover:bg-black/90 text-white flex items-center justify-center backdrop-blur-sm border border-white/20 transition-all z-10"
+                              aria-label="Foto Berikutnya"
+                            >
+                              <ChevronRight className="h-4 w-4" />
+                            </button>
+                            {/* Dots */}
+                            <div className="absolute bottom-2 left-0 right-0 flex justify-center items-center gap-1 z-10">
+                              {run.image_urls.map((_: string, idx: number) => (
+                                <span
+                                  key={idx}
+                                  className={cn(
+                                    "rounded-full h-1 transition-all",
+                                    (historySlideIndices[run.id] || 0) === idx
+                                      ? "w-4 bg-purple-500"
+                                      : "w-1 bg-white/40"
+                                  )}
+                                />
+                              ))}
+                            </div>
+                          </>
+                        )}
+                      </>
                     )}
-                    <div className="absolute top-2.5 left-2.5">
+                    <div className="absolute top-2.5 left-2.5 z-10">
                       <span className="px-2 py-0.5 rounded-md text-[10px] font-semibold bg-black/70 backdrop-blur-sm text-zinc-200 border border-white/10 uppercase">
                         {run.template_preset}
                       </span>
@@ -1522,10 +2072,14 @@ export function GeneratedImagesPage() {
                         <span>Posting</span>
                       </button>
                       <a
-                        href={formatMediaUrl(run.video_url || run.image_urls?.[0])}
-                        download="visual.png"
+                        href={formatMediaUrl(
+                          run.video_url ||
+                            (run.image_urls && run.image_urls[historySlideIndices[run.id] || 0]) ||
+                            run.image_urls?.[0]
+                        )}
+                        download={`visual_${(historySlideIndices[run.id] || 0) + 1}.png`}
                         className="p-1.5 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-zinc-400 hover:text-zinc-200 transition-colors"
-                        title="Download"
+                        title="Download Foto"
                       >
                         <Download className="h-3.5 w-3.5" />
                       </a>
@@ -1837,13 +2391,22 @@ export function GeneratedImagesPage() {
       {/* ─── Social Publish Modal ────────────────────────────────────────── */}
       {socialModalOpen && selectedRunForSocial && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4">
-          <div className="w-full max-w-md rounded-2xl border border-zinc-800 bg-[#0c0c0f] p-6 space-y-5 shadow-2xl animate-in fade-in-50 zoom-in-95">
+          <div className="w-full max-w-lg max-h-[90vh] overflow-y-auto rounded-2xl border border-zinc-800 bg-[#0c0c0f] p-6 space-y-5 shadow-2xl animate-in fade-in-50 zoom-in-95">
             <div className="flex items-center justify-between border-b border-zinc-800 pb-3">
               <div className="flex items-center gap-2">
                 <Share2 className="h-4 w-4 text-purple-400" />
                 <h3 className="text-sm font-bold text-white">Posting ke Media Sosial</h3>
               </div>
-              <button onClick={() => setSocialModalOpen(false)} className="text-zinc-500 hover:text-zinc-300">
+              <button
+                onClick={() => {
+                  setSocialModalOpen(false);
+                  if (audioPlayerRef.current) {
+                    audioPlayerRef.current.pause();
+                    setPlayingTrackId(null);
+                  }
+                }}
+                className="text-zinc-500 hover:text-zinc-300"
+              >
                 <X className="h-4 w-4" />
               </button>
             </div>
@@ -1861,11 +2424,242 @@ export function GeneratedImagesPage() {
               </div>
             ) : (
               <div className="space-y-4">
+                {/* Post Summary & Bulking Album Indicator */}
+                <div className="rounded-xl border border-zinc-800 bg-zinc-900/60 p-3 space-y-2">
+                  <div className="flex items-center justify-between">
+                    <span className="text-[11px] font-medium text-zinc-400 uppercase tracking-wider">
+                      Format Pengiriman
+                    </span>
+                    <span className="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-purple-500/15 text-purple-300 border border-purple-500/30">
+                      {selectedRunForSocial.image_urls && selectedRunForSocial.image_urls.length > 1
+                        ? `Carousel Album (${selectedRunForSocial.image_urls.length} Foto)`
+                        : selectedRunForSocial.video_url
+                        ? "Video"
+                        : "Foto Tunggal"}
+                    </span>
+                  </div>
+
+                  {selectedRunForSocial.image_urls && selectedRunForSocial.image_urls.length > 1 ? (
+                    <div className="space-y-1.5 pt-1">
+                      <p className="text-[11px] text-zinc-400">
+                        Seluruh {selectedRunForSocial.image_urls.length} foto akan dikirim sekaligus sebagai album carousel (bulking) ke platform media sosial yang mendukung.
+                      </p>
+                      <div className="flex items-center gap-1.5 overflow-x-auto pb-1 pt-0.5">
+                        {selectedRunForSocial.image_urls.map((u: string, idx: number) => (
+                          <img
+                            key={idx}
+                            src={formatMediaUrl(u)}
+                            alt=""
+                            className="h-14 w-10 rounded-md object-cover border border-zinc-700 shrink-0"
+                          />
+                        ))}
+                      </div>
+                    </div>
+                  ) : (
+                    <p className="text-[11px] text-zinc-400">
+                      Topik: <span className="text-zinc-200 font-medium">{selectedRunForSocial.topic}</span>
+                    </p>
+                  )}
+                </div>
+
+                {/* Music Options inside Modal */}
+                <div className="rounded-xl border border-zinc-800 bg-zinc-900/60 p-3 space-y-2.5">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <Music className="h-4 w-4 text-purple-400" />
+                      <div>
+                        <span className="text-xs font-semibold text-zinc-200 block">
+                          Sertakan Musik Latar
+                        </span>
+                        <span className="text-[10px] text-zinc-500">
+                          TikTok, Instagram, Facebook (Repliz Gold)
+                        </span>
+                      </div>
+                    </div>
+                    <label className="relative inline-flex items-center cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={modalMusicEnabled}
+                        onChange={(e) => {
+                          const val = e.target.checked;
+                          setModalMusicEnabled(val);
+                          if (val && modalMusicTracks.length === 0) {
+                            loadModalMusicTracks();
+                          }
+                          if (!val && audioPlayerRef.current) {
+                            audioPlayerRef.current.pause();
+                            setPlayingTrackId(null);
+                          }
+                        }}
+                        className="sr-only peer"
+                      />
+                      <div className="w-9 h-5 bg-zinc-800 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-zinc-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-purple-600"></div>
+                    </label>
+                  </div>
+
+                  {modalMusicEnabled && (
+                    <div className="space-y-2 pt-1 border-t border-zinc-800/80">
+                      <div className="grid grid-cols-2 gap-2">
+                        <button
+                          type="button"
+                          onClick={() => setModalMusicMode("auto")}
+                          className={cn(
+                            "flex items-center justify-center gap-1.5 py-1.5 px-2 rounded-lg border text-xs font-medium transition-all",
+                            modalMusicMode === "auto"
+                              ? "border-purple-500 bg-purple-500/15 text-purple-200 ring-1 ring-purple-500/30"
+                              : "border-zinc-800 bg-zinc-900 text-zinc-400 hover:text-zinc-200"
+                          )}
+                        >
+                          <Sparkles className="h-3 w-3 text-purple-400" />
+                          <span>Otomatis Trending</span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setModalMusicMode("custom");
+                            if (modalMusicTracks.length === 0) loadModalMusicTracks();
+                          }}
+                          className={cn(
+                            "flex items-center justify-center gap-1.5 py-1.5 px-2 rounded-lg border text-xs font-medium transition-all",
+                            modalMusicMode === "custom"
+                              ? "border-purple-500 bg-purple-500/15 text-purple-200 ring-1 ring-purple-500/30"
+                              : "border-zinc-800 bg-zinc-900 text-zinc-400 hover:text-zinc-200"
+                          )}
+                        >
+                          <Music2 className="h-3 w-3 text-purple-400" />
+                          <span>Pilih Lagu TikTok</span>
+                        </button>
+                      </div>
+
+                      {modalMusicMode === "auto" ? (
+                        <p className="text-[10px] text-zinc-400 bg-purple-500/5 border border-purple-500/20 rounded-md p-2">
+                          Platform media sosial akan menyisipkan audio trending teratas secara otomatis.
+                        </p>
+                      ) : (
+                        <div className="space-y-2">
+                          {modalSelectedTrack ? (
+                            <div className="flex items-center justify-between p-2 rounded-lg border border-purple-500/30 bg-purple-500/10">
+                              <div className="flex items-center gap-2 min-w-0">
+                                {modalSelectedTrack.thumbnail ? (
+                                  <img
+                                    src={modalSelectedTrack.thumbnail}
+                                    alt=""
+                                    className="h-8 w-8 rounded object-cover shrink-0"
+                                  />
+                                ) : (
+                                  <div className="h-8 w-8 rounded bg-purple-900/40 flex items-center justify-center shrink-0">
+                                    <Music className="h-3.5 w-3.5 text-purple-300" />
+                                  </div>
+                                )}
+                                <div className="min-w-0">
+                                  <p className="text-xs font-semibold text-purple-200 truncate">{modalSelectedTrack.name}</p>
+                                  <p className="text-[10px] text-purple-300/80 truncate">{modalSelectedTrack.artist}</p>
+                                </div>
+                              </div>
+                              <div className="flex items-center gap-1 shrink-0">
+                                <button
+                                  type="button"
+                                  onClick={(e) => togglePlayAudio(modalSelectedTrack, e)}
+                                  className="p-1 rounded bg-purple-500/20 text-purple-300 hover:bg-purple-500/40"
+                                  title="Putar Demo"
+                                >
+                                  {playingTrackId === modalSelectedTrack.id ? (
+                                    <Pause className="h-3 w-3" />
+                                  ) : (
+                                    <Play className="h-3 w-3" />
+                                  )}
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => setModalSelectedTrack(null)}
+                                  className="px-1.5 py-0.5 rounded bg-zinc-800 text-[10px] text-zinc-300 hover:bg-zinc-700"
+                                >
+                                  Ganti
+                                </button>
+                              </div>
+                            </div>
+                          ) : (
+                            <>
+                              <div className="relative">
+                                <input
+                                  type="text"
+                                  value={modalMusicSearch}
+                                  onChange={(e) => setModalMusicSearch(e.target.value)}
+                                  onKeyDown={(e) => {
+                                    if (e.key === "Enter") {
+                                      e.preventDefault();
+                                      loadModalMusicTracks(modalMusicSearch);
+                                    }
+                                  }}
+                                  placeholder="Cari lagu TikTok..."
+                                  className="w-full rounded-lg bg-zinc-950 border border-zinc-800 pl-7 pr-2 py-1 text-xs text-zinc-200 placeholder-zinc-600 focus:outline-none focus:border-purple-500"
+                                />
+                                <Search className="absolute left-2 top-1/2 -translate-y-1/2 h-3 w-3 text-zinc-500" />
+                              </div>
+
+                              <div className="max-h-36 overflow-y-auto space-y-1 pr-1">
+                                {loadingModalMusic ? (
+                                  <div className="py-4 text-center text-[11px] text-zinc-500 flex items-center justify-center gap-1.5">
+                                    <RefreshCw className="h-3 w-3 animate-spin" />
+                                    <span>Memuat musik...</span>
+                                  </div>
+                                ) : modalMusicTracks.length === 0 ? (
+                                  <div className="py-2 text-center text-[10px] text-zinc-500">
+                                    Tekan Enter untuk mencari lagu.
+                                  </div>
+                                ) : (
+                                  modalMusicTracks.map((track) => (
+                                    <div
+                                      key={track.id}
+                                      onClick={() => setModalSelectedTrack(track)}
+                                      className="flex items-center justify-between p-1.5 rounded-lg border border-zinc-800/80 bg-zinc-950/60 hover:bg-zinc-850 cursor-pointer"
+                                    >
+                                      <div className="flex items-center gap-1.5 min-w-0">
+                                        {track.thumbnail && (
+                                          <img src={track.thumbnail} alt="" className="h-6 w-6 rounded object-cover shrink-0" />
+                                        )}
+                                        <div className="min-w-0">
+                                          <p className="text-[11px] font-medium text-zinc-200 truncate">{track.name}</p>
+                                          <p className="text-[9px] text-zinc-500 truncate">{track.artist}</p>
+                                        </div>
+                                      </div>
+                                      <div className="flex items-center gap-1 shrink-0 ml-1">
+                                        <button
+                                          type="button"
+                                          onClick={(e) => togglePlayAudio(track, e)}
+                                          className="p-1 rounded bg-zinc-800 text-zinc-300"
+                                        >
+                                          {playingTrackId === track.id ? (
+                                            <Pause className="h-2.5 w-2.5" />
+                                          ) : (
+                                            <Play className="h-2.5 w-2.5" />
+                                          )}
+                                        </button>
+                                        <button
+                                          type="button"
+                                          onClick={() => setModalSelectedTrack(track)}
+                                          className="px-1.5 py-0.5 rounded bg-purple-600 text-white text-[9px]"
+                                        >
+                                          Pilih
+                                        </button>
+                                      </div>
+                                    </div>
+                                  ))
+                                )}
+                              </div>
+                            </>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+
                 <div>
                   <span className="text-[11px] font-medium text-zinc-400 uppercase tracking-wider block mb-2">
                     Pilih Akun Tujuan:
                   </span>
-                  <div className="space-y-1.5 max-h-56 overflow-y-auto pr-0.5">
+                  <div className="space-y-1.5 max-h-52 overflow-y-auto pr-0.5">
                     {accounts.length === 0 ? (
                       <div className="py-4 px-3 rounded-xl border border-zinc-800 bg-zinc-900/40 text-center text-xs text-zinc-400">
                         Belum ada akun media sosial yang terhubung.
@@ -1936,7 +2730,13 @@ export function GeneratedImagesPage() {
                   className="w-full flex items-center justify-center gap-2 py-2.5 rounded-xl bg-purple-600 hover:bg-purple-500 text-white text-xs font-semibold transition-colors disabled:opacity-50"
                 >
                   <Send className="h-3.5 w-3.5" />
-                  <span>{publishingSocial ? "Menjadwalkan..." : "Jadwalkan Posting Sekarang"}</span>
+                  <span>
+                    {publishingSocial
+                      ? "Menjadwalkan..."
+                      : selectedRunForSocial.image_urls && selectedRunForSocial.image_urls.length > 1
+                      ? `Jadwalkan Posting Album (${selectedRunForSocial.image_urls.length} Foto)`
+                      : "Jadwalkan Posting Sekarang"}
+                  </span>
                 </button>
               </div>
             )}

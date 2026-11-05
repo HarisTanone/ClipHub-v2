@@ -177,5 +177,73 @@ def test_typography_store_active_only_kwarg_compatibility():
     assert font is not None
 
 
+@pytest.mark.asyncio
+async def test_social_dispatch_album_and_music(monkeypatch):
+    """Verify _dispatch_social_post formats album type for multi-image and handles music parameters."""
+    from src.infrastructure.ai_image_studio_service import AIImageStudioService
+    from unittest.mock import AsyncMock
+
+    captured_payloads = []
+
+    async def mock_repliz_post(path, json_body=None):
+        captured_payloads.append((path, json_body))
+        return {"status": "ok", "scheduleId": "sch_123"}
+
+    monkeypatch.setattr("src.presentation.routes.social.helpers.repliz_post", mock_repliz_post)
+
+    studio = AIImageStudioService()
+
+    # Case 1: Multi-image (album / carousel bulking) with custom TikTok music
+    status, details = await studio._dispatch_social_post(
+        account_ids=["acc_tiktok_1"],
+        media_urls=["https://storage.com/img1.png", "https://storage.com/img2.png", "https://storage.com/img3.png"],
+        title="Album Inspirasi Motivasi Pagi",
+        caption="Headline\n\nBody content",
+        media_type="image",
+        music_enabled=True,
+        music_id="7123456789",
+        music_name="Trending Beat",
+        music_artist="Top Producer",
+        music_thumbnail="https://p16.tiktokcdn.com/thumb.jpg",
+    )
+
+    assert status == "scheduled"
+    assert details["post_type"] == "album"
+    assert details["media_count"] == 3
+    assert details["music_enabled"] is True
+
+    assert len(captured_payloads) == 1
+    path, payload = captured_payloads[0]
+    assert path == "/public/schedule"
+    assert payload["type"] == "album"
+    assert len(payload["medias"]) == 3
+    assert payload["medias"][0]["url"] == "https://storage.com/img1.png"
+    assert payload["medias"][1]["url"] == "https://storage.com/img2.png"
+    assert payload["additionalInfo"]["isAiGenerated"] is False
+    assert payload["additionalInfo"]["music"]["id"] == "7123456789"
+    assert payload["additionalInfo"]["music"]["name"] == "Trending Beat"
+    assert payload["additionalInfo"]["isAutoAddMusic"] is False
+
+    # Case 2: Single image with auto-trending music
+    captured_payloads.clear()
+    status2, details2 = await studio._dispatch_social_post(
+        account_ids=["acc_ig_1"],
+        media_urls=["https://storage.com/single.png"],
+        title="Single Quote Post",
+        caption="Quote caption",
+        media_type="image",
+        music_enabled=True,
+    )
+
+    assert status2 == "scheduled"
+    assert details2["post_type"] == "image"
+    assert details2["media_count"] == 1
+    assert len(captured_payloads) == 1
+    _, payload2 = captured_payloads[0]
+    assert payload2["type"] == "image"
+    assert payload2["additionalInfo"]["isAutoAddMusic"] is True
+
+
+
 
 

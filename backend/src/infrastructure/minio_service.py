@@ -13,19 +13,78 @@ logger = logging.getLogger(__name__)
 
 
 class MinioService:
-    """Handles video uploads to MinIO bucket with job-based folder structure."""
+    """Handles video uploads to MinIO bucket with job-based folder structure.
+    
+    Dynamically resolves credentials from database (system_settings) with fallback to settings / .env.
+    """
 
     def __init__(self):
         self._client: Optional[Minio] = None
-        self._bucket = getattr(settings, "MINIO_BUCKET", "") or "default"
+
+    def reset_client(self) -> None:
+        """Invalidate cached client so next call reloads credentials from database."""
+        self._client = None
+        logger.info("[minio] Client cache invalidated, will re-read settings on next access")
+
+    def _get_config(self) -> dict:
+        """Resolve MinIO settings dynamically from database (system_settings), falling back to settings / .env."""
+        try:
+            from src.infrastructure.system_config_store import get_system_setting
+            endpoint = get_system_setting("MINIO_ENDPOINT") or getattr(settings, "MINIO_ENDPOINT", "") or "localhost:9000"
+            access_key = get_system_setting("MINIO_ACCESS_KEY") or getattr(settings, "MINIO_ACCESS_KEY", "")
+            secret_key = get_system_setting("MINIO_SECRET_KEY") or getattr(settings, "MINIO_SECRET_KEY", "")
+            bucket = get_system_setting("MINIO_BUCKET") or getattr(settings, "MINIO_BUCKET", "") or "cliperhub"
+            secure_val = get_system_setting("MINIO_SECURE")
+            secure = secure_val if secure_val is not None and secure_val != "" else getattr(settings, "MINIO_SECURE", False)
+            enabled_val = get_system_setting("MINIO_ENABLED")
+            enabled = enabled_val if enabled_val is not None and enabled_val != "" else getattr(settings, "MINIO_ENABLED", True)
+        except Exception:
+            endpoint = getattr(settings, "MINIO_ENDPOINT", "") or "localhost:9000"
+            access_key = getattr(settings, "MINIO_ACCESS_KEY", "")
+            secret_key = getattr(settings, "MINIO_SECRET_KEY", "")
+            bucket = getattr(settings, "MINIO_BUCKET", "") or "cliperhub"
+            secure = getattr(settings, "MINIO_SECURE", False)
+            enabled = getattr(settings, "MINIO_ENABLED", True)
+
+        # Normalize endpoint (strip http:// or https:// if user entered URL)
+        endpoint_clean = str(endpoint).strip()
+        if endpoint_clean.startswith("http://"):
+            endpoint_clean = endpoint_clean[len("http://"):]
+        elif endpoint_clean.startswith("https://"):
+            endpoint_clean = endpoint_clean[len("https://"):]
+            secure = True
+
+        return {
+            "endpoint": endpoint_clean.rstrip("/"),
+            "access_key": str(access_key).strip(),
+            "secret_key": str(secret_key).strip(),
+            "bucket": str(bucket).strip() or "cliperhub",
+            "secure": bool(secure),
+            "enabled": bool(enabled),
+        }
+
+    @property
+    def bucket(self) -> str:
+        return self._get_config()["bucket"]
+
+    @property
+    def _bucket(self) -> str:
+        # backward compatibility for internal references
+        return self.bucket
+
+    @property
+    def is_configured(self) -> bool:
+        cfg = self._get_config()
+        return bool(cfg["endpoint"] and cfg["access_key"] and cfg["secret_key"] and cfg["bucket"])
+
+    @property
+    def is_enabled(self) -> bool:
+        return self._get_config()["enabled"]
 
     @property
     def client(self) -> Minio:
         if self._client is None:
-            endpoint = getattr(settings, "MINIO_ENDPOINT", "") or "localhost:9000"
-            access_key = getattr(settings, "MINIO_ACCESS_KEY", "")
-            secret_key = getattr(settings, "MINIO_SECRET_KEY", "")
-            secure = getattr(settings, "MINIO_SECURE", False)
+            cfg = self._get_config()
 
             import urllib3
             http_client = urllib3.PoolManager(
@@ -34,24 +93,47 @@ class MinioService:
             )
 
             self._client = Minio(
-                endpoint,
-                access_key=access_key,
-                secret_key=secret_key,
-                secure=secure,
+                cfg["endpoint"],
+                access_key=cfg["access_key"],
+                secret_key=cfg["secret_key"],
+                secure=cfg["secure"],
                 http_client=http_client,
             )
 
             # Ensure bucket exists
             try:
-                if not self._client.bucket_exists(self._bucket):
-                    self._client.make_bucket(self._bucket)
-                    logger.info(f"[minio] Created bucket: {self._bucket}")
+                if not self._client.bucket_exists(cfg["bucket"]):
+                    self._client.make_bucket(cfg["bucket"])
+                    logger.info(f"[minio] Created bucket: {cfg['bucket']}")
             except S3Error as e:
                 logger.warning(f"[minio] Bucket check failed: {e}")
             except Exception as e:
                 logger.warning(f"[minio] Bucket connection check failed: {e}")
 
         return self._client
+
+    def test_connection(self) -> dict:
+        """Test reachability and authentication to MinIO Object Storage."""
+        cfg = self._get_config()
+        if not cfg["endpoint"]:
+            return {"connected": False, "error": "Endpoint MinIO belum dikonfigurasi", "config": cfg}
+        try:
+            exists = self.client.bucket_exists(cfg["bucket"])
+            return {
+                "connected": True,
+                "bucket_exists": exists,
+                "bucket": cfg["bucket"],
+                "endpoint": cfg["endpoint"],
+                "secure": cfg["secure"],
+                "enabled": cfg["enabled"],
+            }
+        except Exception as e:
+            return {
+                "connected": False,
+                "error": str(e),
+                "bucket": cfg["bucket"],
+                "endpoint": cfg["endpoint"],
+            }
 
     def ensure_job_folder(self, job_id: str) -> str:
         """Create a folder marker for job (MinIO uses prefix-based 'folders').
@@ -106,10 +188,11 @@ class MinioService:
             )
 
             # Direct URL (public if bucket policy allows)
-            endpoint = getattr(settings, "MINIO_ENDPOINT", "") or "localhost:9000"
-            secure = getattr(settings, "MINIO_SECURE", False)
+            cfg = self._get_config()
+            endpoint = cfg["endpoint"]
+            secure = cfg["secure"]
             protocol = "https" if secure else "http"
-            direct_url = f"{protocol}://{endpoint}/{self._bucket}/{object_name}"
+            direct_url = f"{protocol}://{endpoint}/{self.bucket}/{object_name}"
 
             result = {
                 "object_name": object_name,
@@ -207,3 +290,10 @@ def get_minio_service() -> MinioService:
     if _minio_service is None:
         _minio_service = MinioService()
     return _minio_service
+
+
+def reset_minio_client() -> None:
+    """Invalidate global singleton Minio client so settings reload from DB."""
+    global _minio_service
+    if _minio_service is not None:
+        _minio_service.reset_client()

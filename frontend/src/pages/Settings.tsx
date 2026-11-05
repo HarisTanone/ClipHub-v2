@@ -17,7 +17,7 @@ import { useToast } from "@/components/ui/Toast";
 import { confirmDialog } from "@/components/ui/ConfirmDialog";
 import { useAuth } from "@/hooks/useAuth";
 import {
-  system, storage, systemConfig, autopilotApi, hermesVideoGenApi, presetsApi, socialApi,
+  system, storage, systemConfig, minioApi, autopilotApi, hermesVideoGenApi, presetsApi, socialApi,
   type AutopilotSettings, type AutopilotQuotaInfo, type AutopilotChannelInspectResult,
   type AutopilotPlaylistItem, type AutopilotVideoItem, type AutopilotPlaylistVideosResult,
   type HermesVideoGenSettings, type HermesVideoGenQuota, type HermesVideoGenRun,
@@ -664,6 +664,8 @@ export function Settings() {
   const [isLoadingSysConfig, setIsLoadingSysConfig] = useState<boolean>(false);
   const [isSavingSysConfig, setIsSavingSysConfig] = useState<boolean>(false);
   const [canEditSecrets, setCanEditSecrets] = useState<boolean>(false);
+  const [isTestingMinio, setIsTestingMinio] = useState<boolean>(false);
+  const [minioTestResult, setMinioTestResult] = useState<{ success: boolean; data?: any; error?: string } | null>(null);
 
   const [settings, setSettings] = useState({
     default_aspect_ratio: "9:16",
@@ -1578,6 +1580,25 @@ export function Settings() {
       }
     } catch (err: any) {
       toast.error("Gagal mereset konfigurasi: " + (err?.message || ""));
+    }
+  }
+
+  async function handleTestMinio() {
+    setIsTestingMinio(true);
+    setMinioTestResult(null);
+    try {
+      const res = await minioApi.testConnection();
+      setMinioTestResult(res);
+      if (res.success) {
+        toast.success(`Koneksi MinIO berhasil! Bucket: ${res.data?.bucket || "tersambung"}`);
+      } else {
+        toast.error(res.error || "Tes koneksi MinIO gagal. Periksa endpoint & kredensial.");
+      }
+    } catch (err: any) {
+      toast.error(err?.message || "Gagal menghubungi server MinIO");
+      setMinioTestResult({ success: false, error: err?.message });
+    } finally {
+      setIsTestingMinio(false);
     }
   }
 
@@ -5672,7 +5693,7 @@ export function Settings() {
                   { id: "render_limits", label: "Render & Limits" },
                   { id: "vision_reframe", label: "Vision & Reframe" },
                   { id: "broll_effects", label: "B-Roll & Effects" },
-                  { id: "storage_cdn", label: "Storage & CDN" },
+                  { id: "storage", label: "Object Storage (MinIO)" },
                 ].map((cat) => (
                   <button
                     key={cat.id}
@@ -5724,6 +5745,27 @@ export function Settings() {
               </div>
             )}
 
+            {/* Quick Banner for MinIO Object Storage */}
+            {(sysConfigCategory === "storage" || sysConfigCategory === "all" && sysConfigSearch.toLowerCase().includes("minio") || sysConfigSearch.toLowerCase().includes("minio") || sysConfigSearch.toLowerCase().includes("storage")) && (
+              <div className="rounded-xl border border-sky-500/30 bg-sky-950/20 p-3.5 flex flex-wrap items-center justify-between gap-3 text-xs">
+                <div className="flex items-center gap-2.5">
+                  <HardDrive className="h-4 w-4 text-sky-400 shrink-0" />
+                  <span className="text-zinc-300">
+                    Konfigurasi <strong>MinIO Object Storage</strong> dikelola langsung dari database sistem. Perubahan nilai di bawah ini langsung berlaku tanpa perlu mengedit file .env atau restart server.
+                  </span>
+                </div>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={handleTestMinio}
+                  disabled={isTestingMinio}
+                  icon={isTestingMinio ? <RefreshCw className="h-3.5 w-3.5 animate-spin" /> : <HardDrive className="h-3.5 w-3.5" />}
+                >
+                  {isTestingMinio ? "Memeriksa Koneksi..." : "Tes Koneksi MinIO"}
+                </Button>
+              </div>
+            )}
+
             {/* Settings Cards List */}
             {isLoadingSysConfig ? (
               <div className="p-8 text-center text-zinc-500 text-xs">
@@ -5754,7 +5796,11 @@ export function Settings() {
                       "NINE_ROUTER_MODEL_AI_LAYER",
                     ]);
                     if (HIDDEN_KEYS.has(item.key)) return false;
-                    if (sysConfigCategory !== "all" && item.category !== sysConfigCategory) return false;
+                    if (
+                      sysConfigCategory !== "all" &&
+                      item.category !== sysConfigCategory &&
+                      !(sysConfigCategory === "storage" && item.category === "storage_cdn")
+                    ) return false;
                     if (sysConfigSearch.trim()) {
                       const q = sysConfigSearch.toLowerCase();
                       return item.key.toLowerCase().includes(q) || (item.description || "").toLowerCase().includes(q);

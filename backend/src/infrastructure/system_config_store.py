@@ -1205,17 +1205,25 @@ SYSTEM_SETTINGS_METADATA: dict[str, dict[str, Any]] = {
         "description": "Direktori home / state Hermes Agent",
     },
 
-    # ─── Group 6: Storage / MinIO & CDN ──────────────────────────────────────
+    # ─── Group 6: Storage / MinIO Object Storage ─────────────────────────────
+    "MINIO_ENABLED": {
+        "category": "storage",
+        "data_type": "bool",
+        "min_role": "superadmin",
+        "is_secret": False,
+        "default": False,
+        "description": "Aktifkan integrasi MinIO Object Storage",
+    },
     "MINIO_ENDPOINT": {
-        "category": "storage_cdn",
+        "category": "storage",
         "data_type": "string",
         "min_role": "superadmin",
         "is_secret": False,
         "default": "",
-        "description": "Host dan port endpoint MinIO Object Storage",
+        "description": "Host dan port endpoint MinIO Object Storage (contoh: localhost:9000)",
     },
     "MINIO_ACCESS_KEY": {
-        "category": "storage_cdn",
+        "category": "storage",
         "data_type": "string",
         "min_role": "superadmin",
         "is_secret": True,
@@ -1223,7 +1231,7 @@ SYSTEM_SETTINGS_METADATA: dict[str, dict[str, Any]] = {
         "description": "Access Key kredensial MinIO",
     },
     "MINIO_SECRET_KEY": {
-        "category": "storage_cdn",
+        "category": "storage",
         "data_type": "string",
         "min_role": "superadmin",
         "is_secret": True,
@@ -1231,7 +1239,7 @@ SYSTEM_SETTINGS_METADATA: dict[str, dict[str, Any]] = {
         "description": "Secret Key kredensial MinIO",
     },
     "MINIO_BUCKET": {
-        "category": "storage_cdn",
+        "category": "storage",
         "data_type": "string",
         "min_role": "superadmin",
         "is_secret": False,
@@ -1239,52 +1247,12 @@ SYSTEM_SETTINGS_METADATA: dict[str, dict[str, Any]] = {
         "description": "Nama bucket penyimpanan MinIO",
     },
     "MINIO_SECURE": {
-        "category": "storage_cdn",
+        "category": "storage",
         "data_type": "bool",
         "min_role": "superadmin",
         "is_secret": False,
         "default": False,
-        "description": "Gunakan protokol HTTPS aman untuk koneksi MinIO",
-    },
-    "CDN_ENABLED": {
-        "category": "storage_cdn",
-        "data_type": "bool",
-        "min_role": "superadmin",
-        "is_secret": False,
-        "default": False,
-        "description": "Aktifkan upload file hasil ke MinIO/S3 CDN",
-    },
-    "CDN_ENDPOINT": {
-        "category": "storage_cdn",
-        "data_type": "string",
-        "min_role": "superadmin",
-        "is_secret": False,
-        "default": "",
-        "description": "Endpoint URL MinIO / S3",
-    },
-    "CDN_BUCKET": {
-        "category": "storage_cdn",
-        "data_type": "string",
-        "min_role": "superadmin",
-        "is_secret": False,
-        "default": "",
-        "description": "Nama bucket penyimpanan video",
-    },
-    "CDN_ACCESS_KEY": {
-        "category": "storage_cdn",
-        "data_type": "string",
-        "min_role": "superadmin",
-        "is_secret": True,
-        "default": "",
-        "description": "Access Key MinIO / S3",
-    },
-    "CDN_SECRET_KEY": {
-        "category": "storage_cdn",
-        "data_type": "string",
-        "min_role": "superadmin",
-        "is_secret": True,
-        "default": "",
-        "description": "Secret Key MinIO / S3",
+        "description": "Gunakan protokol HTTPS aman untuk koneksi MinIO (false untuk http biasa)",
     },
 
     # ─── Group 7: Integrations & Cloud Drives ────────────────────────────────
@@ -1420,6 +1388,15 @@ ROLE_LEVELS = {
     "viewer": 1,
 }
 
+# Legacy alias mapping to prevent duplication across CDN and MinIO
+_SETTING_ALIASES = {
+    "CDN_ENDPOINT": "MINIO_ENDPOINT",
+    "CDN_BUCKET": "MINIO_BUCKET",
+    "CDN_ACCESS_KEY": "MINIO_ACCESS_KEY",
+    "CDN_SECRET_KEY": "MINIO_SECRET_KEY",
+    "CDN_ENABLED": "MINIO_ENABLED",
+}
+
 # In-memory settings cache
 _SETTINGS_CACHE: dict[str, Any] = {}
 _TABLE_ENSURED = False
@@ -1484,6 +1461,7 @@ def mask_secret_value(value: str) -> str:
 
 def get_system_setting(key: str, default: Any = None) -> Any:
     """Get a system setting with in-memory caching and .env fallback."""
+    key = _SETTING_ALIASES.get(key, key)
     if key in _SETTINGS_CACHE:
         return _SETTINGS_CACHE[key]
 
@@ -1514,6 +1492,7 @@ def get_system_setting(key: str, default: Any = None) -> Any:
 def set_system_setting(key: str, value: Any, user_id: Optional[int] = None) -> bool:
     """Upsert a system setting in DB and invalidate in-memory cache."""
     _ensure_settings_table()
+    key = _SETTING_ALIASES.get(key, key)
     meta = SYSTEM_SETTINGS_METADATA.get(key, {})
     category = meta.get("category", "general")
     data_type = meta.get("data_type", "string")
@@ -1547,6 +1526,12 @@ def set_system_setting(key: str, value: Any, user_id: Optional[int] = None) -> b
         # Invalidate / update cache
         _SETTINGS_CACHE[key] = _coerce_value(val_str, data_type)
         logger.info(f"[system_config_store] Set {key} by user_id={user_id}")
+        if key.startswith("MINIO_"):
+            try:
+                from src.infrastructure.minio_service import reset_minio_client
+                reset_minio_client()
+            except Exception:
+                pass
         try:
             from src.infrastructure.model_settings_store import set_model_setting, VALID_MODEL_KEYS
             if key in VALID_MODEL_KEYS:
@@ -1567,7 +1552,11 @@ def bulk_set_system_settings(updates: dict[str, Any], user_id: Optional[int] = N
     count = 0
     conn = get_dict_connection()
     try:
-        for key, value in updates.items():
+        minio_updated = False
+        for raw_key, value in updates.items():
+            key = _SETTING_ALIASES.get(raw_key, raw_key)
+            if key.startswith("MINIO_"):
+                minio_updated = True
             meta = SYSTEM_SETTINGS_METADATA.get(key, {})
             category = meta.get("category", "general")
             data_type = meta.get("data_type", "string")
@@ -1594,6 +1583,12 @@ def bulk_set_system_settings(updates: dict[str, Any], user_id: Optional[int] = N
             count += 1
         conn.commit()
         logger.info(f"[system_config_store] Bulk updated {count} settings by user_id={user_id}")
+        if minio_updated:
+            try:
+                from src.infrastructure.minio_service import reset_minio_client
+                reset_minio_client()
+            except Exception:
+                pass
         try:
             from src.infrastructure.model_settings_store import set_model_setting, VALID_MODEL_KEYS
             for key, value in updates.items():
@@ -1676,6 +1671,11 @@ def seed_system_settings_defaults():
     conn = get_dict_connection()
     try:
         cur = conn.cursor()
+
+        # Clean up redundant legacy CDN keys from database and migrate category
+        cur.execute("DELETE FROM system_settings WHERE key IN ('CDN_ENABLED', 'CDN_ENDPOINT', 'CDN_BUCKET', 'CDN_ACCESS_KEY', 'CDN_SECRET_KEY')")
+        cur.execute("UPDATE system_settings SET category = 'storage' WHERE category = 'storage_cdn'")
+
         cur.execute("SELECT key FROM system_settings")
         existing_keys = {r["key"] for r in cur.fetchall()}
 

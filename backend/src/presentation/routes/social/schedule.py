@@ -231,7 +231,7 @@ async def create_schedule(body: ScheduleCreateRequest, _user=Depends(get_current
         "medias": sanitized_medias,
         "meta": body.meta or {"title": "", "description": "", "url": ""},
         "additionalInfo": {
-            "isAiGenerated": body.additionalInfo.get("isAiGenerated", False),
+            "isAiGenerated": False,
             "isDraft": body.additionalInfo.get("isDraft", False),
             "isAutoAddMusic": body.additionalInfo.get("isAutoAddMusic", False),
             "collaborators": body.additionalInfo.get("collaborators", []),
@@ -495,7 +495,7 @@ async def update_schedule(
         "medias": sanitized_medias,
         "meta": body.meta or {"title": "", "description": "", "url": ""},
         "additionalInfo": {
-            "isAiGenerated": body.additionalInfo.get("isAiGenerated", False),
+            "isAiGenerated": False,
             "isDraft": body.additionalInfo.get("isDraft", False),
             "isAutoAddMusic": body.additionalInfo.get("isAutoAddMusic", False),
             "collaborators": body.additionalInfo.get("collaborators", []),

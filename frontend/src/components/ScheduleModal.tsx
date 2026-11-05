@@ -168,7 +168,7 @@ function getPlatformColorClass(type: string) {
 
 async function fetchSocialAccounts(): Promise<any[]> {
   const token = getToken();
-  const res = await fetch(`${API_BASE}/api/social/accounts?page=1&limit=100`, {
+  const res = await fetch(`${API_BASE}/api/social/accounts?page=1&limit=200`, {
     headers: { Authorization: `Bearer ${token}` },
   });
   if (!res.ok) return [];
@@ -260,7 +260,6 @@ export function ScheduleModal({
   const [topic, setTopic] = useState("");
   const [tagsStr, setTagsStr] = useState("");
   const [postType, setPostType] = useState<"video" | "reel" | "story">(initialPrefs.postType);
-  const [isAiGenerated, setIsAiGenerated] = useState(false);
   const [scheduleMode, setScheduleMode] = useState<"now" | "later">(initialPrefs.scheduleMode);
   const [batchScheduleMode, setBatchScheduleMode] = useState<"same" | "ai" | "custom">(initialPrefs.batchScheduleMode);
   const [customScheduleTimes, setCustomScheduleTimes] = useState<string[]>([]);
@@ -807,7 +806,7 @@ export function ScheduleModal({
         topic: topic || "",
         tags,
         firstReply: firstReply.trim() || undefined,
-        isAiGenerated,
+        isAiGenerated: false,
         scheduleAt,
         type: postType,
         isAutoAddMusic: hasSelectedMusic,
@@ -1367,32 +1366,19 @@ export function ScheduleModal({
                 )}
               </div>
 
-              {/* Post Type & AI Toggle */}
+              {/* Post Type */}
               <div className="space-y-2 pt-1 border-t border-zinc-800/80">
-                <div className="flex items-center justify-between gap-2">
-                  <div className="w-1/2 space-y-1">
-                    <label className="text-xs font-semibold text-zinc-200">Tipe Post</label>
-                    <select
-                      value={postType}
-                      onChange={(e: any) => setPostType(e.target.value)}
-                      className="w-full h-8 rounded-xl border border-zinc-800 bg-zinc-950/60 px-2.5 text-xs text-zinc-200 outline-none focus:border-emerald-500/50"
-                    >
-                      <option value="video">Video</option>
-                      <option value="reel">Reel / Shorts</option>
-                      <option value="story">Story</option>
-                    </select>
-                  </div>
-                  <div className="w-1/2 pt-4">
-                    <label className="flex items-center gap-2 text-[11px] text-zinc-300 cursor-pointer">
-                      <input
-                        type="checkbox"
-                        checked={isAiGenerated}
-                        onChange={(e) => setIsAiGenerated(e.target.checked)}
-                        className="h-3.5 w-3.5 rounded border-zinc-700 bg-zinc-900 text-emerald-500 focus:ring-0 cursor-pointer"
-                      />
-                      <span>Tandai Konten AI</span>
-                    </label>
-                  </div>
+                <div className="space-y-1">
+                  <label className="text-xs font-semibold text-zinc-200">Tipe Post</label>
+                  <select
+                    value={postType}
+                    onChange={(e: any) => setPostType(e.target.value)}
+                    className="w-full h-8 rounded-xl border border-zinc-800 bg-zinc-950/60 px-2.5 text-xs text-zinc-200 outline-none focus:border-emerald-500/50"
+                  >
+                    <option value="video">Video</option>
+                    <option value="reel">Reel / Shorts</option>
+                    <option value="story">Story</option>
+                  </select>
                 </div>
               </div>
             </div>

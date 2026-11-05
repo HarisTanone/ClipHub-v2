@@ -23,6 +23,18 @@ class UploadResponse(BaseModel):
     error: Optional[str] = None
 
 
+@router.get("/status")
+@router.post("/test")
+async def check_minio_status(user: CurrentUser = Depends(get_current_user)):
+    """Check MinIO object storage connection and bucket health."""
+    try:
+        minio_svc = get_minio_service()
+        res = minio_svc.test_connection()
+        return {"success": res.get("connected", False), "data": res}
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+
 @router.post("/upload/{job_id}/{clip_rank}")
 async def upload_clip_to_minio(
     job_id: str,

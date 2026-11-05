@@ -12,6 +12,8 @@ from src.presentation.routes.social.instagram import instagram_router
 from src.presentation.routes.social.threads import threads_router
 from src.presentation.routes.social.youtube import youtube_router
 from src.presentation.routes.social.linkedin import linkedin_router
+from src.presentation.routes.social.twitter import twitter_router
+from src.presentation.routes.social.pinterest import pinterest_router
 from src.presentation.routes.social.schedule import schedule_router
 from src.presentation.routes.social.publish import publish_router
 from src.presentation.routes.social.engagement import engagement_router
@@ -24,6 +26,8 @@ router.include_router(instagram_router)
 router.include_router(threads_router)
 router.include_router(youtube_router)
 router.include_router(linkedin_router)
+router.include_router(twitter_router)
+router.include_router(pinterest_router)
 router.include_router(schedule_router)
 router.include_router(publish_router)
 router.include_router(engagement_router)

@@ -57,6 +57,11 @@ class InstantGenerateRequest(BaseModel):
     image_count: Optional[int] = Field(1, ge=1, le=10)
     auto_post: Optional[bool] = False
     target_account_ids: Optional[List[str]] = None
+    music_enabled: Optional[bool] = False
+    music_id: Optional[str] = None
+    music_name: Optional[str] = None
+    music_artist: Optional[str] = None
+    music_thumbnail: Optional[str] = None
 
 
 class SuggestContentRequest(BaseModel):
@@ -128,6 +133,11 @@ class SocialPublishRequest(BaseModel):
     account_ids: List[str]
     title: Optional[str] = ""
     caption: Optional[str] = ""
+    music_enabled: Optional[bool] = False
+    music_id: Optional[str] = None
+    music_name: Optional[str] = None
+    music_artist: Optional[str] = None
+    music_thumbnail: Optional[str] = None
 
 
 # ─── Endpoints ───────────────────────────────────────────────────────────────
@@ -401,6 +411,11 @@ async def generate_instant(
             accent_color=req.accent_color or "#EAB308",
             auto_post=bool(req.auto_post),
             target_account_ids=req.target_account_ids or [],
+            music_enabled=bool(req.music_enabled),
+            music_id=req.music_id,
+            music_name=req.music_name,
+            music_artist=req.music_artist,
+            music_thumbnail=req.music_thumbnail,
             trigger_source="instant_studio",
         )
         return {
@@ -493,7 +508,32 @@ async def publish_run_to_social(
         title=req.title or matched.get("topic", "Visual Post"),
         caption=req.caption or f"{matched.get('quote_headline', '')}\n\n{matched.get('quote_body', '')}",
         media_type="video" if matched.get("media_type") == "video_footage" else ("carousel" if len(media_urls) > 1 else "photo"),
+        music_enabled=bool(req.music_enabled),
+        music_id=req.music_id,
+        music_name=req.music_name,
+        music_artist=req.music_artist,
+        music_thumbnail=req.music_thumbnail,
     )
+
+    try:
+        from src.infrastructure.database import get_dict_connection
+        import json
+        conn = get_dict_connection()
+        try:
+            conn.execute(
+                """
+                UPDATE ai_image_runs
+                SET social_post_status = ?, social_details = ?
+                WHERE id = ? AND user_id = ?
+                """,
+                (status, json.dumps(details), req.run_id, user.id),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+    except Exception as db_err:
+        logger.warning(f"[AIImageStudio] Failed to update ai_image_runs post status: {db_err}")
+
     return {
         "success": status == "scheduled",
         "status": status,

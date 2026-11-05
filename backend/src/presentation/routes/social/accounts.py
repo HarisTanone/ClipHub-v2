@@ -93,8 +93,8 @@ async def list_account_users(user: CurrentUser = Depends(get_current_user)):
 @accounts_router.get("/accounts")
 async def list_accounts(
     page: int = Query(1, ge=1),
-    limit: int = Query(20, ge=1, le=100),
-    types: Optional[str] = Query(None, description="Comma-separated: facebook,instagram,tiktok,threads,youtube,linkedin"),
+    limit: int = Query(50, ge=1, le=200),
+    types: Optional[str] = Query(None, description="Comma-separated: facebook,instagram,tiktok,threads,youtube,linkedin,twitter,pinterest"),
     search: Optional[str] = None,
     user_id: Optional[int] = Query(None, description="Filter by local user ID (superadmin only)"),
     user: CurrentUser = Depends(get_current_user),

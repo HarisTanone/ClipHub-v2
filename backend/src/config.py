@@ -243,12 +243,34 @@ class Settings(BaseSettings):
     # === Subtitle Style Override (from assets/subtitle/*.json) ===
     SUBTITLE_STYLE_ID: str = ""  # empty = use DB preset, set to JSON style id to override
 
-    # === CDN / MinIO Storage ===
-    CDN_ENABLED: bool = False
-    CDN_ENDPOINT: str = ""
-    CDN_BUCKET: str = ""
-    CDN_ACCESS_KEY: str = ""
-    CDN_SECRET_KEY: str = ""
+    # === Object Storage (MinIO) ===
+    MINIO_ENABLED: bool = False
+    MINIO_ENDPOINT: str = ""
+    MINIO_ACCESS_KEY: str = ""
+    MINIO_SECRET_KEY: str = ""
+    MINIO_BUCKET: str = ""
+    MINIO_SECURE: bool = False
+
+    # Legacy CDN aliases mapped to MinIO for backward compatibility
+    @property
+    def CDN_ENABLED(self) -> bool:
+        return self.MINIO_ENABLED
+
+    @property
+    def CDN_ENDPOINT(self) -> str:
+        return self.MINIO_ENDPOINT
+
+    @property
+    def CDN_BUCKET(self) -> str:
+        return self.MINIO_BUCKET
+
+    @property
+    def CDN_ACCESS_KEY(self) -> str:
+        return self.MINIO_ACCESS_KEY
+
+    @property
+    def CDN_SECRET_KEY(self) -> str:
+        return self.MINIO_SECRET_KEY
 
     # ─── Asset Fetcher & Video Search Engines ─────────────────────────────
     PEXELS_API_KEY: str = ""
@@ -356,12 +378,6 @@ class Settings(BaseSettings):
     HERMES_BIN: str = "hermes"
     HERMES_HOME: str = ""  # empty → ~/.hermes
 
-    # === MinIO (Object Storage) ===
-    MINIO_ENDPOINT: str = ""
-    MINIO_ACCESS_KEY: str = ""
-    MINIO_SECRET_KEY: str = ""
-    MINIO_BUCKET: str = ""
-    MINIO_SECURE: bool = False
     TELEGRAM_BOT_NOTIFY_URL: str = ""  # URL to POST upload notifications to Telegram bot
     TELEGRAM_BOT_TOKEN: str = ""  # Bot token for direct Telegram API (alternative to notify URL)
     TELEGRAM_CHAT_ID: str = ""  # Chat/group ID to send notifications to

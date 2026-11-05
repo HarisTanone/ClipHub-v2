@@ -682,6 +682,11 @@ class AIImageStudioService:
         accent_color: str = "#EAB308",
         auto_post: bool = False,
         target_account_ids: Optional[list[str]] = None,
+        music_enabled: bool = False,
+        music_id: Optional[str] = None,
+        music_name: Optional[str] = None,
+        music_artist: Optional[str] = None,
+        music_thumbnail: Optional[str] = None,
         trigger_source: str = "manual",
     ) -> dict[str, Any]:
         """Execute a full generation batch, record run, and optionally auto-post."""
@@ -763,7 +768,7 @@ class AIImageStudioService:
                         local_paths.append(l_path)
                         public_urls.append(p_url)
 
-                # 4. Social Auto Post if requested
+                # 4. Social Auto Post if requested (supports album bulking & background music)
                 social_status = "idle"
                 social_details: dict[str, Any] = {}
                 if auto_post and target_account_ids:
@@ -772,13 +777,18 @@ class AIImageStudioService:
                         media_urls=public_urls,
                         title=f"{topic} — {headline[:60]}",
                         caption=f"{headline}\n\n{body_text}\n\n— {author}\n\n#{topic.replace(' ', '')} #Inspirasi #Mindset #HermesAI",
-                        media_type="video" if media_type == "video_footage" else ("carousel" if len(public_urls) > 1 else "photo"),
+                        media_type="video" if media_type == "video_footage" else "image",
+                        music_enabled=music_enabled,
+                        music_id=music_id,
+                        music_name=music_name,
+                        music_artist=music_artist,
+                        music_thumbnail=music_thumbnail,
                     )
 
                 # 5. Record run in SQLite
                 conn = get_dict_connection()
                 try:
-                    conn.execute("""
+                    cursor = conn.execute("""
                         INSERT INTO ai_image_runs (
                             user_id, run_date, session_name, topic, prompt,
                             quote_hook, quote_headline, quote_body, quote_author, quote_handle,
@@ -793,6 +803,7 @@ class AIImageStudioService:
                         json.dumps(public_urls), video_url, json.dumps(local_paths),
                         social_status, json.dumps(social_details), trigger_source,
                     ))
+                    run_id = cursor.lastrowid
 
                     conn.execute("""
                         UPDATE ai_image_settings
@@ -806,8 +817,12 @@ class AIImageStudioService:
 
                 return {
                     "success": True,
+                    "id": run_id,
                     "session_name": session_name,
                     "topic": topic,
+                    "quote_headline": headline,
+                    "quote_body": body_text,
+                    "quote_hook": hook,
                     "template": tpl_id,
                     "font": font_name,
                     "model": active_model,
@@ -846,34 +861,97 @@ class AIImageStudioService:
         media_urls: list[str],
         title: str,
         caption: str,
-        media_type: str = "photo",
+        media_type: str = "image",
+        music_enabled: bool = False,
+        music_id: Optional[str] = None,
+        music_name: Optional[str] = None,
+        music_artist: Optional[str] = None,
+        music_thumbnail: Optional[str] = None,
     ) -> tuple[str, dict[str, Any]]:
-        """Dispatch schedule request to Repliz API for target accounts."""
+        """Dispatch schedule request to Repliz API for target accounts with album/multi-image bulking & music support."""
         from src.presentation.routes.social.helpers import repliz_post
 
-        medias = [{"url": u, "type": "video" if media_type == "video" else "image", "alt": title} for u in media_urls]
+        is_video = (media_type in ("video", "video_footage"))
+
+        # Determine Repliz post type strictly adhering to Repliz Swagger enum:
+        # ["text", "image", "video", "reel", "album", "link", "story"]
+        if is_video:
+            post_type = "video"
+        elif len(media_urls) > 1:
+            post_type = "album"  # Repliz carousel of 2-5+ images
+        else:
+            post_type = "image"  # Single image
+
+        # Construct medias list adhering to Repliz ScheduleMedia schema
+        medias = []
+        for idx, u in enumerate(media_urls):
+            medias.append({
+                "type": "video" if is_video else "image",
+                "url": u,
+                "alt": f"{title} - Bagian {idx + 1}" if len(media_urls) > 1 else title[:100],
+                "thumbnail": u if not is_video else "",
+                "customThumbnail": False,
+            })
+
         schedule_at = (dt.datetime.now(dt.timezone.utc) + dt.timedelta(minutes=5)).strftime("%Y-%m-%dT%H:%M:%S.000Z")
+
+        # Additional info including music and AI labels
+        additional_info: dict[str, Any] = {
+            "isAiGenerated": False,
+            "isDraft": False,
+            "isShareToFeed": True,
+            "collaborators": [],
+        }
+
+        # Music configuration for platforms that support music (TikTok image/album, Instagram, Facebook)
+        if music_enabled or music_id:
+            if music_id:
+                additional_info["music"] = {
+                    "id": str(music_id),
+                    "artist": music_artist or "",
+                    "name": music_name or "",
+                    "thumbnail": music_thumbnail or "",
+                    "volume": {
+                        "video": 50,
+                        "music": 100,
+                    },
+                }
+                additional_info["isAutoAddMusic"] = False
+            else:
+                # Let TikTok/platforms auto-add recommended trending music to the photo post / album
+                additional_info["isAutoAddMusic"] = True
 
         successes = []
         failures = []
 
+        # TikTok titles are cut to 90 chars, Pinterest to 100 chars
+        safe_title = title[:90]
+
         for acc_id in account_ids:
             payload = {
-                "title": title[:100],
+                "title": safe_title,
                 "description": caption,
-                "type": media_type,
+                "type": post_type,
                 "medias": medias,
                 "accountId": acc_id,
                 "scheduleAt": schedule_at,
+                "additionalInfo": additional_info,
             }
             try:
                 res = await repliz_post("/public/schedule", json_body=payload)
                 successes.append({"accountId": acc_id, "result": res})
             except Exception as ex:
+                logger.error(f"[AIImageStudio] Repliz post failed for account {acc_id}: {ex}")
                 failures.append({"accountId": acc_id, "error": str(ex)})
 
         status = "scheduled" if successes else ("failed" if failures else "idle")
-        details = {"successes": successes, "failures": failures}
+        details = {
+            "post_type": post_type,
+            "media_count": len(medias),
+            "music_enabled": music_enabled or bool(music_id),
+            "successes": successes,
+            "failures": failures,
+        }
         return status, details
 
     # ─── Hermes Background Autonomous Scheduler ──────────────────────────────
@@ -934,6 +1012,8 @@ class AIImageStudioService:
                         media_type=settings_data.get("media_type", "image"),
                         auto_post=settings_data.get("auto_post_enabled", False),
                         target_account_ids=settings_data.get("target_account_ids", []),
+                        music_enabled=settings_data.get("music_enabled", False),
+                        music_id=str(settings_data.get("music_track")) if (settings_data.get("music_track") and str(settings_data.get("music_track")).isdigit()) else None,
                         trigger_source="hermes_scheduler",
                     )
                 )
