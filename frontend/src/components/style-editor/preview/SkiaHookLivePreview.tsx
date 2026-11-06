@@ -16,5 +16,5 @@ export { NativeHookPreview };
  * Delegates to NativeHookPreview so preview pixels match final bake exactly.
  */
 export function SkiaHookLivePreview({ style }: SkiaHookLivePreviewProps) {
-  return <NativeHookPreview style={{ ...style, engine: "skia" }} preset={style.animation} frame={30} />;
+  return <NativeHookPreview style={{ ...style, engine: "skia" }} frame={30} />;
 }

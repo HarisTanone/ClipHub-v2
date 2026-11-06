@@ -12,7 +12,10 @@ interface NativeHookPreviewProps {
 
 export function NativeHookPreview({
   style,
-  preset = style.engine === "hyperframes" ? style.hf_template : (style.animation || style.hf_template),
+  // The editor sends a complete explicit config. Animation/template IDs are
+  // renderer IDs, not database preset slugs; passing them as `preset` makes the
+  // backend reject valid native styles when no saved preset exists.
+  preset = null,
   frame = 30,
 }: NativeHookPreviewProps) {
   const [imageUrl, setImageUrl] = useState<string | null>(null);
