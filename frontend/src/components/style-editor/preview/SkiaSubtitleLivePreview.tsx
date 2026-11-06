@@ -19,11 +19,13 @@ export function SkiaSubtitleLivePreview({
 }) {
   const presetId = style.stylePreset || "clean_editorial";
   const preset = SKIA_SUBTITLE_PRESETS.find((p) => p.id === presetId) || SKIA_SUBTITLE_PRESETS[0];
-  const posTop = style.position === "top"
-    ? `${style.positionY != null && style.positionY <= 35 ? style.positionY : 15}%`
-    : style.position === "center"
-      ? `${style.positionY != null && style.positionY > 35 && style.positionY < 65 ? style.positionY : 50}%`
-      : `${style.positionY != null && style.positionY >= 65 ? style.positionY : 82}%`;
+  const posTop = style.positionY != null
+    ? `${style.positionY}%`
+    : style.position === "top"
+      ? "15%"
+      : style.position === "center"
+        ? "50%"
+        : "82%";
   const sampleWords = ["ini", "kata", "penting", "banget", "untuk", "kamu"];
   const count = Math.max(1, Math.min(6, style.maxWordsPerLine || 4));
   const words = sampleWords.slice(0, count);
@@ -58,8 +60,10 @@ export function SkiaSubtitleLivePreview({
             const currentIdx = activeWordIdx % words.length;
             const displayWords = isWordPop ? [words[currentIdx]] : isTyping ? words.slice(0, currentIdx + 1) : words;
 
-            // Card / Capsule background styles
-            const hasBg = style.bgEnabled || presetId === "glassmorphism" || presetId === "clean_editorial" || presetId === "podcast_pro" || presetId === "modern_mono";
+            // Card / Capsule background styles — mirror backend skia_subtitle_renderer:
+            // bg is "on" when bgEnabled OR bgOpacity > 0 OR the preset is a card preset.
+            const presetAlwaysBg = presetId === "glassmorphism" || presetId === "clean_editorial" || presetId === "podcast_pro" || presetId === "modern_mono";
+            const hasBg = !!style.bgEnabled || (style.bgOpacity != null && style.bgOpacity > 0) || presetAlwaysBg;
             const bgOpacity = style.bgOpacity ?? (presetId === "glassmorphism" ? 0.25 : 0.75);
             const bgHex = style.bgColor || (presetId === "podcast_pro" ? "#121216" : presetId === "modern_mono" ? "#080c14" : presetId === "clean_editorial" ? "#0f172a" : "#1e293b");
             const bgAlpha = Math.round(Math.max(0, Math.min(1, bgOpacity)) * 255).toString(16).padStart(2, "0");
