@@ -10,7 +10,7 @@ interface NativeHookPreviewProps {
   frame?: number;
 }
 
-export function NativeHookPreview({ style, preset, frame = 30 }: NativeHookPreviewProps) {
+export function NativeHookPreview({ style, preset = style.hf_template, frame = 30 }: NativeHookPreviewProps) {
   const [imageUrl, setImageUrl] = useState<string | null>(null);
   const [specHash, setSpecHash] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
