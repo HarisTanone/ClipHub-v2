@@ -888,7 +888,7 @@ class SkiaSubtitleRenderer:
                 or style.get("highlight_color")
                 or "#00FFFF"
             )
-            glow_c = self._parse_rgba(glow_color_str, 1.0)
+            glow_c = self._parse_rgba(glow_color_str, 0.35)
             glow_rad = max(6, int(style.get("glow_radius") or style.get("glowSize") or style.get("glow_size") or 16))
 
             glow_layer = Image.new("RGBA", (self._width, self._height), (0, 0, 0, 0))
@@ -897,7 +897,9 @@ class SkiaSubtitleRenderer:
             has_glow_items = False
             for s in slots_info:
                 if s["is_active"]:
-                    g_draw.text((s["word_x"], s["word_y"]), s["text"], font=s["font"], fill=glow_c, stroke_width=glow_rad * 2, stroke_fill=glow_c)
+                    # Approximate CSS text-shadow (0 0 10px + 0 0 20px) — a solid
+                    # stroke at glow_rad*2 blows into an opaque blob and drowns glyphs.
+                    g_draw.text((s["word_x"], s["word_y"]), s["text"], font=s["font"], fill=glow_c, stroke_width=max(4, glow_rad // 2), stroke_fill=glow_c)
                     has_glow_items = True
                 elif preset_id in ("neon_tube", "neon_glow"):
                     cyan_c = (6, 182, 212, 180)
@@ -905,8 +907,8 @@ class SkiaSubtitleRenderer:
                     has_glow_items = True
 
             if has_glow_items:
-                wide_glow = glow_layer.filter(ImageFilter.GaussianBlur(radius=glow_rad))
-                core_glow = glow_layer.filter(ImageFilter.GaussianBlur(radius=max(3, glow_rad // 2)))
+                wide_glow = glow_layer.filter(ImageFilter.GaussianBlur(radius=glow_rad // 2))
+                core_glow = glow_layer.filter(ImageFilter.GaussianBlur(radius=max(3, glow_rad // 4)))
                 img = Image.alpha_composite(img, wide_glow)
                 img = Image.alpha_composite(img, core_glow)
                 draw = ImageDraw.Draw(img)
@@ -1064,7 +1066,7 @@ class SkiaSubtitleRenderer:
                 path = os.path.join(fdir, name)
                 if os.path.exists(path):
                     try:
-                        return ImageFont.truetype(path, font_size)
+                        return self._apply_variable_weight(ImageFont.truetype(path, font_size), font_weight)
                     except Exception:
                         pass
 
@@ -1078,12 +1080,24 @@ class SkiaSubtitleRenderer:
                 c_name = file_name.replace(" ", "").replace("-", "").lower()
                 if clean_name in c_name:
                     try:
-                        return ImageFont.truetype(os.path.join(fdir, file_name), font_size)
+                        return self._apply_variable_weight(ImageFont.truetype(os.path.join(fdir, file_name), font_size), font_weight)
                     except Exception:
                         pass
 
         # Guaranteed fallback
         return ImageFont.load_default()
+
+    @staticmethod
+    def _apply_variable_weight(font: ImageFont.FreeTypeFont, font_weight: str) -> ImageFont.FreeTypeFont:
+        """Set wght axis on variable fonts so render weight matches the Google Font preview."""
+        try:
+            if hasattr(font, "set_variation_by_axes"):
+                w = str(font_weight).strip()
+                target = int(w) if w.isdigit() else (700 if w.lower() in ("bold", "black", "extrabold", "heavy") else 400)
+                font.set_variation_by_axes([target])
+        except Exception:
+            pass  # static font or no wght axis — loaded instance is fine
+        return font
 
     def _parse_rgba(self, color_str: str, opacity: float = 1.0) -> Tuple[int, int, int, int]:
         """Convert CSS hex or rgba string into Pillow RGBA tuple (0-255)."""

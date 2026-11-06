@@ -306,8 +306,7 @@ def resolve_public_media_base_url() -> str:
 
     Priority:
     1. System settings / Config / ENV (if set and not dummy placeholder)
-    2. Auto-detection from local systemd Cloudflare Tunnel (trycloudflare.com)
-    3. Empty string (falls back to GDrive if configured)
+    2. Empty string (falls back to configured storage uploader)
     """
     from src.config import settings
 
@@ -320,18 +319,10 @@ def resolve_public_media_base_url() -> str:
     for candidate in raw_candidates:
         if candidate and isinstance(candidate, str):
             clean = candidate.strip().rstrip("/")
-            if clean and "cliperhub-tunnel.trycloudflare.com" not in clean:
+            if clean and "trycloudflare.com" not in clean:
                 return clean
 
-    # Auto-detect live Quick Tunnel from systemd journal on Linux
-    if os.name != "nt":
-        try:
-            cmd = "journalctl -u autocliper-tunnel -n 50 --no-pager 2>/dev/null | grep -oE 'https://[a-zA-Z0-9.-]+\\.trycloudflare\\.com' | tail -n 1"
-            res = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=2)
-            detected = res.stdout.strip()
-            if detected and "trycloudflare.com" in detected and "cliperhub-tunnel" not in detected:
-                return detected.rstrip("/")
-        except Exception:
-            pass
-
+    # Never hand Repliz a stale Cloudflare quick-tunnel URL. It may return
+    # Cloudflare-managed robots.txt that explicitly blocks Meta crawlers.
+    # A configured stable URL must be fixed at deployment, not auto-guessed.
     return ""

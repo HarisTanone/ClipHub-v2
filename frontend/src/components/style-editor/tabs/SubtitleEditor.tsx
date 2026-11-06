@@ -368,7 +368,24 @@ export function SubtitleEditor({
                     key={p.id}
                     type="button"
                     onClick={() => {
+                      // Reset preset-scoped visual keys first so switching presets
+                      // never leaves stale overrides from the previous preset.
+                      const base = { ...style };
+                      (
+                        ["gradientEnabled", "glowEnabled", "dualStyleEnabled",
+                         "highlightBold", "highlightScale", "shadowEnabled",
+                         "strokeEnabled", "bgEnabled", "highlightGlow", "italic"] as const
+                      ).forEach((k) => { (base[k] as boolean | undefined) = false; });
+                      (["gradientFrom", "gradientTo", "glowColor", "bgColor", "bgOpacity",
+                        "bgRadius", "bgPadding", "shadowColor", "shadowBlur",
+                        "strokeColor", "strokeWidth"] as const).forEach((k) => { (base[k] as string | number | undefined) = undefined; });
+                      (base as Record<string, unknown>).glassmorphism = false;
+                      (base as Record<string, unknown>).activeWordBadge = false;
+                      (base as Record<string, unknown>).dualLayer = false;
+                      (base as Record<string, unknown>).retroChrome = false;
+                      (base as Record<string, unknown>).outlineStack = false;
                       update({
+                        ...base,
                         stylePreset: p.id,
                         color: p.color,
                         highlightColor: p.highlightColor,
@@ -377,15 +394,20 @@ export function SubtitleEditor({
                         fontWeight: p.fontWeight,
                         uppercase: p.uppercase,
                         lineTransition: p.lineTransition,
-                        gradientEnabled: p.gradientEnabled,
-                        gradientFrom: p.gradientFrom,
-                        gradientTo: p.gradientTo,
-                        glowEnabled: p.glowEnabled,
-                        glowColor: p.glowColor,
                         position: p.positionY <= 35 ? "top" : p.positionY >= 65 ? "bottom" : "center",
                         positionY: p.positionY,
                         maxWordsPerLine: p.maxWordsPerLine,
                         engine: "skia",
+                        gradientEnabled: p.gradientEnabled ?? undefined,
+                        gradientFrom: p.gradientFrom,
+                        gradientTo: p.gradientTo,
+                        glowEnabled: p.glowEnabled ?? undefined,
+                        glowColor: p.glowColor,
+                        glassmorphism: p.glassmorphism ?? undefined,
+                        activeWordBadge: p.activeWordBadge ?? undefined,
+                        dualLayer: p.dualLayer ?? undefined,
+                        retroChrome: p.retroChrome ?? undefined,
+                        outlineStack: p.outlineStack ?? undefined,
                       });
                       setActivePreset(p.id);
                     }}
@@ -842,11 +864,13 @@ export function SubtitleEditor({
             </div>
             <CanvasPreviewFrame canvas={canvas} thumbnailUrl={thumbnailUrl}>
               {(() => {
-                const posTop = style.position === "top"
-                  ? (style.positionY != null && style.positionY <= 35 ? style.positionY : 15)
-                  : style.position === "center"
-                    ? (style.positionY != null && style.positionY > 35 && style.positionY < 65 ? style.positionY : 50)
-                    : (style.positionY != null && style.positionY >= 65 ? style.positionY : 82);
+                const posTop = style.positionY != null
+                  ? style.positionY
+                  : style.position === "top"
+                    ? 15
+                    : style.position === "center"
+                      ? 50
+                      : 82;
                 return (
                   <div className="absolute left-0 right-0 flex justify-center px-3 pointer-events-none" style={{ top: `${posTop}%`, transform: "translateY(-50%)" }}>
                     {(() => {
@@ -920,11 +944,13 @@ export function SubtitleEditor({
             <CanvasPreviewFrame canvas={canvas} thumbnailUrl={thumbnailUrl}>
               <div className="absolute inset-0 bg-gradient-to-b from-zinc-700/10 to-transparent pointer-events-none" />
               {(() => {
-                const posTop = style.position === "top"
-                  ? (style.positionY != null && style.positionY <= 35 ? style.positionY : 15)
-                  : style.position === "center"
-                    ? (style.positionY != null && style.positionY > 35 && style.positionY < 65 ? style.positionY : 50)
-                    : (style.positionY != null && style.positionY >= 65 ? style.positionY : 82);
+                const posTop = style.positionY != null
+                  ? style.positionY
+                  : style.position === "top"
+                    ? 15
+                    : style.position === "center"
+                      ? 50
+                      : 82;
                 const sampleWords = ["ini", "kata", "penting", "banget", "untuk", "kamu"];
                 const count = Math.max(1, Math.min(6, style.maxWordsPerLine || 4));
                 const words = sampleWords.slice(0, count);

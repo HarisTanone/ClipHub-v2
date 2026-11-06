@@ -10,7 +10,6 @@ from typing import Any, Dict, List, Optional
 from src.config import settings
 from src.infrastructure.clip_outputs import find_final_clip
 from src.infrastructure.db_connection import get_dict_connection
-from src.infrastructure.gdrive_uploader import gdrive_uploader
 from src.infrastructure.social_compliance import (
     ensure_social_compliant_video,
     ensure_social_compliant_thumbnail,
@@ -440,23 +439,9 @@ class SocialAutoPostService:
             if public_backend:
                 video_url = f"{public_backend}/api/jobs/{job_id}/clips/{rank}/final"
                 thumb_url = f"{public_backend}/api/jobs/{job_id}/clips/{rank}/thumb"
-            elif gdrive_uploader.is_configured:
-                try:
-                    filename = f"{job_id}_clip{rank}.mp4"
-                    drive_res = gdrive_uploader.upload_video(compliant_clip_file, filename=filename)
-                    video_url = drive_res.get("direct_link", "") or drive_res.get("web_view_link", "")
-                except Exception as e:
-                    logger.error(f"auto_post: GDrive upload failed for clip #{rank}: {e}")
-                    errors.append(f"Clip #{rank} GDrive upload: {str(e)}")
-
-                if compliant_thumb and os.path.exists(compliant_thumb):
-                    try:
-                        thumb_res = gdrive_uploader.upload_image(
-                            compliant_thumb, filename=f"{job_id}_clip{rank}_thumb.jpg"
-                        )
-                        thumb_url = thumb_res.get("direct_link") or thumb_res.get("web_view_link")
-                    except Exception as e:
-                        logger.warning(f"auto_post: Thumbnail GDrive upload failed for clip #{rank}: {e}")
+            else:
+                logger.warning(f"auto_post: Clip #{rank} skipped — AUTOCLIPER_PUBLIC_URL kosong; Google Drive diblokir robots.txt Meta crawler.")
+                continue
 
             if not video_url:
                 logger.warning(f"auto_post: No public video URL for clip #{rank}. AUTOCLIPER_PUBLIC_URL or GDrive must be configured.")

@@ -676,7 +676,6 @@ class HermesVideoGenService:
             from src.infrastructure.social_auto_post_service import SocialAutoPostService
             from src.infrastructure.social_compliance import resolve_public_media_base_url
             from src.presentation.routes.social.helpers import repliz_post
-            from src.infrastructure.gdrive_uploader import gdrive_uploader
 
             auto_post = SocialAutoPostService()
             user_accounts = await auto_post.get_connected_accounts(user_id=user_id)
@@ -694,20 +693,9 @@ class HermesVideoGenService:
             video_url = f"{public_backend}/api/video-generator/jobs/{job.job_id}/video" if public_backend else ""
             thumb_url = f"{public_backend}/api/video-generator/jobs/{job.job_id}/thumbnail" if public_backend else ""
 
-            # Fallback to Google Drive if configured and public_backend is missing
-            if not video_url and gdrive_uploader.is_configured and job.output_path and os.path.exists(job.output_path):
-                try:
-                    drive_res = gdrive_uploader.upload_video(job.output_path, filename=f"{job.job_id}_video.mp4")
-                    video_url = drive_res.get("direct_link", "") or drive_res.get("web_view_link", "")
-                    thumb_path = os.path.join(settings.VIDEO_GEN_OUTPUT_DIR, job.job_id, f"thumbnail_{job.job_id}.jpg")
-                    if os.path.exists(thumb_path):
-                        th_res = gdrive_uploader.upload_image(thumb_path, filename=f"{job.job_id}_thumb.jpg")
-                        thumb_url = th_res.get("direct_link", "") or th_res.get("web_view_link", "")
-                except Exception as g_err:
-                    logger.warning(f"hermes_videogen: GDrive upload failed for job {job.job_id}: {g_err}")
-
+            # GDrive URLs blocked by Meta crawler robots.txt — no GDrive fallback for social media.
             if not video_url:
-                logger.warning(f"hermes_videogen: No public video URL for job {job.job_id}. Auto-post dispatch requires AUTOCLIPER_PUBLIC_URL, Cloudflare Tunnel, or Google Drive.")
+                logger.warning(f"hermes_videogen: No public video URL for job {job.job_id}. Auto-post dispatch requires AUTOCLIPER_PUBLIC_URL.")
                 return 0
 
             target_region = settings_dict.get("target_region") or "ID"

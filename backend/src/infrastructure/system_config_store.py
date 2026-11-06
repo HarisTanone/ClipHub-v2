@@ -1326,7 +1326,7 @@ SYSTEM_SETTINGS_METADATA: dict[str, dict[str, Any]] = {
         "data_type": "string",
         "min_role": "superadmin",
         "is_secret": False,
-        "default": "https://cliperhub-tunnel.trycloudflare.com",
+        "default": "https://jnck.cliperhub.web.id",
         "description": "Public base URL / Tunnel domain untuk media streaming Repliz & sosial media",
     },
     "PUBLISH_MIN_FUTURE_BUFFER_MINUTES": {

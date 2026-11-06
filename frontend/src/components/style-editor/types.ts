@@ -152,6 +152,12 @@ export interface SubtitleStyle {
   gradientTo?: string;
   subjectAwarePositioning?: boolean;
   safeAreaMargin?: number;
+  // Skia preset-scoped decorations (mirror backend preset flags)
+  glassmorphism?: boolean;
+  activeWordBadge?: boolean;
+  dualLayer?: boolean;
+  retroChrome?: boolean;
+  outlineStack?: boolean;
 }
 
 export interface TextEmphasisStyle {

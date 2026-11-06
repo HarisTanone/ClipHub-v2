@@ -124,6 +124,33 @@ class TestSocialCompliance(unittest.TestCase):
         self.assertEqual(get_supported_post_type("video", "threads"), "video")
         self.assertEqual(get_supported_post_type("video", "linkedin"), "video")
 
+    def test_resolve_public_media_base_url(self):
+        from src.infrastructure.social_compliance import resolve_public_media_base_url
+
+        # No config at all -> empty string (no auto-detect)
+        with patch("src.config.settings") as mock_settings, patch.dict(os.environ, {}, clear=False):
+            mock_settings.AUTOCLIPER_PUBLIC_URL = ""
+            os.environ.pop("AUTOCLIPER_PUBLIC_URL", None)
+            os.environ.pop("PUBLIC_BACKEND_URL", None)
+            self.assertEqual(resolve_public_media_base_url(), "")
+
+        # Stable URL wins and trailing slash is stripped
+        with patch("src.config.settings") as mock_settings, patch.dict(os.environ, {}, clear=False):
+            mock_settings.AUTOCLIPER_PUBLIC_URL = "https://jnck.cliperhub.web.id/"
+            os.environ.pop("AUTOCLIPER_PUBLIC_URL", None)
+            os.environ.pop("PUBLIC_BACKEND_URL", None)
+            self.assertEqual(
+                resolve_public_media_base_url(),
+                "https://jnck.cliperhub.web.id",
+            )
+
+        # trycloudflare wildcard inner-subdomain drift is hard-blocked
+        with patch("src.config.settings") as mock_settings, patch.dict(os.environ, {}, clear=False):
+            mock_settings.AUTOCLIPER_PUBLIC_URL = "https://xjfcliohj.chomperhub-tunnel.trycloudflare.com"
+            os.environ.pop("AUTOCLIPER_PUBLIC_URL", None)
+            os.environ.pop("PUBLIC_BACKEND_URL", None)
+            self.assertEqual(resolve_public_media_base_url(), "")
+
 
 if __name__ == "__main__":
     unittest.main()

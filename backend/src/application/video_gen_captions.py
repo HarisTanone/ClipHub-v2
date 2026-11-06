@@ -48,17 +48,15 @@ ALL_SUBTITLE_PRESETS = {
 def normalize_subtitle_style(raw_style: Mapping[str, Any] | None = None) -> dict[str, Any]:
     """Return a bounded FFmpeg/libass-compatible caption configuration supporting all Custom Style Editor presets."""
     raw = dict(raw_style or {})
-    raw_preset = str(raw.get("stylePreset") or "classic").strip()
-    preset = raw_preset if raw_preset in ALL_SUBTITLE_PRESETS else "classic"
-    
+    raw_preset = str(raw.get("stylePreset") or "classic_karaoke").strip()
+    preset = raw_preset if raw_preset in ALL_SUBTITLE_PRESETS else "classic_karaoke"
+
     position = _choice(raw.get("position"), "bottom", {"top", "center", "bottom"})
     raw_transition = str(raw.get("lineTransition") or "word_pop")
-    if raw_transition == "karaoke":
-        raw_transition = "word_pop"
     line_transition = _choice(
         raw_transition,
         "word_pop",
-        {"word_pop", "emphasis", "line_reveal", "typing"},
+        {"karaoke", "word_pop", "emphasis", "line_reveal", "typing"},
     )
     animation = _choice(raw.get("animationStyle"), "pop", {"pop", "fade", "slide", "none"})
 

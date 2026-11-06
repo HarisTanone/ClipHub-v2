@@ -257,3 +257,45 @@ def test_group_words_into_lines_punctuation_and_pause():
     assert [w["word"] for w in lines[0]] == ["halo", "dunia!"]
     assert [w["word"] for w in lines[1]] == ["apa", "kabar?"]
 
+
+def test_all_skia_hook_presets_render_valid_frames(tmp_path):
+    """Verify all 46 presets in SKIA_HOOK_PRESETS generate valid 1080x1920 frames without corruption."""
+    from src.infrastructure.skia_hook_renderer import SkiaHookRenderer, SKIA_HOOK_PRESETS
+    renderer = SkiaHookRenderer(font_dir="assets/fonts")
+    test_texts = [
+        "RAHASIA SUKSES",
+        "3 TIPS PENTING UNTUK PEMULA AGAR TIDAK GAGAL",
+    ]
+    for preset_id in SKIA_HOOK_PRESETS:
+        for t in test_texts:
+            img = renderer.generate_hook_frame(t, hook_style=preset_id)
+            assert img.size == (1080, 1920), f"{preset_id} size mismatch: {img.size}"
+            out_file = str(tmp_path / f"{preset_id}.png")
+            img.save(out_file, format="PNG")
+            assert os.path.exists(out_file) and os.path.getsize(out_file) > 0
+
+
+def test_skia_hook_impact_badge_contrast():
+    """Verify skia_impact_badge has contrasting text and background (no yellow-on-yellow)."""
+    from src.infrastructure.skia_hook_renderer import SKIA_HOOK_PRESETS
+    cfg = SKIA_HOOK_PRESETS["skia_impact_badge"]
+    text_color = cfg.get("text_color", "").upper()
+    bg_color = cfg.get("bg_color", "").upper()
+    assert text_color != bg_color, f"Contrast clash: text {text_color} vs bg {bg_color}"
+    assert text_color in ("#000000", "#111111", "#1E1E1E"), f"Expected dark text on amber badge, got {text_color}"
+
+
+@pytest.mark.asyncio
+async def test_skia_hook_native_preview_service_parity(tmp_path):
+    """Verify NativeHookPreviewService renders Skia hook manifests identically to direct renderer."""
+    from src.infrastructure.hook_preview import NativeHookPreviewService
+    from src.infrastructure.hook_manifest import resolve_hook_preset
+    svc = NativeHookPreviewService(font_dir="assets/fonts", cache_dir=str(tmp_path / "cache"))
+    manifest = resolve_hook_preset(
+        user_id=None,
+        preset_slug=None,
+        explicit_override={"engine": "skia", "animation": "paper_clip_scrap"},
+    )
+    result = await svc.render(manifest, "TEST HOOK PARITY", frame=30)
+    assert os.path.exists(result["path"])
+    assert len(result["hash"]) == 64

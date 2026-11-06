@@ -535,36 +535,12 @@ async def publish_clip(body: PublishRequest, _user=Depends(get_current_user)):
                     logger.warning(f"MinIO thumb upload failed: {te}")
         except Exception as me:
             logger.error(f"MinIO upload failed in social publish: {me}")
-            if gdrive_uploader.is_configured:
-                try:
-                    drive_result = gdrive_uploader.upload_video(
-                        compliant_video, filename=upload_filename
-                    )
-                    video_url = drive_result.get("direct_link") or drive_result.get("web_view_link")
-                except Exception as e:
-                    raise HTTPException(status_code=502, detail=f"MinIO dan Google Drive gagal upload: {me} | {e}")
-            else:
-                raise HTTPException(status_code=502, detail=f"MinIO upload gagal: {me}")
+            raise HTTPException(status_code=502, detail=f"MinIO upload gagal: {me}")
     elif gdrive_uploader.is_configured:
-        try:
-            drive_result = gdrive_uploader.upload_video(
-                compliant_video, filename=upload_filename
-            )
-            video_url = drive_result.get("direct_link") or drive_result.get("web_view_link")
-        except Exception as e:
-            logger.error(f"Google Drive upload failed: {e}")
-            raise HTTPException(
-                status_code=502, detail=f"Google Drive upload failed: {str(e)}"
-            )
-
-        if comp_thumb and os.path.exists(comp_thumb):
-            try:
-                thumb_res = gdrive_uploader.upload_image(
-                    comp_thumb, filename=f"{body.jobId}_thumb.jpg"
-                )
-                thumb_url = thumb_res.get("direct_link") or thumb_res.get("web_view_link")
-            except Exception as e:
-                logger.warning(f"Thumbnail upload to Drive failed: {e}")
+        raise HTTPException(
+            status_code=503,
+            detail="AUTOCLIPER_PUBLIC_URL belum dikonfigurasi dan Google Drive dinonaktifkan untuk media Repliz/Meta.",
+        )
 
     if not video_url:
         raise HTTPException(

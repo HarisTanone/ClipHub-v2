@@ -593,16 +593,10 @@ class SubtitleRenderer(ISubtitleRenderer):
         return lines
 
     def _calculate_y_position(self, config: SubtitleStyleConfig) -> str:
-        pos_str = str(config.position or "").strip().lower()
-        if pos_str == "top":
-            return "0.12*h"
-        elif pos_str == "center":
-            return "(h-text_h)/2"
-        elif pos_str == "bottom":
-            pad = config.padding_bottom or int(0.12 * 1920)
-            return f"h-text_h-{pad}"
-
-        if config.position_y:
+        # positionY is the editor's canonical vertical coordinate.  The editor
+        # also sends the coarse position label, so it must not override the
+        # precise value during final drawtext rendering.
+        if config.position_y not in (None, ""):
             try:
                 val_num = float(str(config.position_y).replace("%", "").strip())
                 if 0 <= val_num <= 100:
@@ -610,6 +604,15 @@ class SubtitleRenderer(ISubtitleRenderer):
             except (ValueError, TypeError):
                 pass
             return str(config.position_y)
+
+        pos_str = str(config.position or "").strip().lower()
+        if pos_str == "top":
+            return "0.12*h"
+        if pos_str == "center":
+            return "(h-text_h)/2"
+        if pos_str == "bottom":
+            pad = config.padding_bottom or int(0.12 * 1920)
+            return f"h-text_h-{pad}"
 
         pad = config.padding_bottom or 120
         return f"h-text_h-{pad}"
