@@ -8,7 +8,9 @@ import { useEffect } from "react";
 export function FacebookCallback() {
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
-    const code = params.get("code");
+    const hash = window.location.hash ? window.location.hash.replace(/^#/, "") : "";
+    const hashParams = new URLSearchParams(hash);
+    const code = params.get("code") || hashParams.get("access_token") || hashParams.get("code") || params.get("access_token");
     if (code && window.opener) {
       window.opener.postMessage({ type: "facebook-oauth-callback", code }, window.location.origin);
       window.close();

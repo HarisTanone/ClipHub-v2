@@ -182,12 +182,12 @@ async function facebookPages(accessToken: string): Promise<{ docs: any[] }> {
   return res.json();
 }
 
-async function facebookConnect(pageId: string, accessToken: string): Promise<{ accountId: string }> {
+async function facebookConnect(pageId: string, pageToken: string): Promise<{ accountId: string }> {
   const token = getToken();
   const res = await fetch(`${API_BASE}/api/social/facebook/connect`, {
     method: "POST",
     headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-    body: JSON.stringify({ pageId, token: accessToken }),
+    body: JSON.stringify({ pageId, token: pageToken }),
   });
   if (!res.ok) throw new Error((await res.json().catch(() => ({}))).detail || "Failed to connect");
   return res.json();
@@ -466,8 +466,17 @@ function FacebookConnectFlow({ onConnected }: { onConnected: () => void }) {
 
   async function handleConnect(pageId: string) {
     setConnecting(pageId);
+    const page = pages.find((p) => p.id === pageId);
+    // Must use the PAGE token (p.token), not the user token from exchange.
+    // User token causes 403 "(#210) A page access token is required".
+    const pageToken = page?.token || page?.access_token || "";
+    if (!pageToken) {
+      toast.error("Page token missing — reconnect Facebook and retry");
+      setConnecting(null);
+      return;
+    }
     try {
-      await facebookConnect(pageId, accessToken);
+      await facebookConnect(pageId, pageToken);
       toast.success("Facebook page connected");
       setStep("idle");
       setPages([]);
