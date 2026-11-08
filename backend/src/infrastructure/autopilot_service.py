@@ -16,12 +16,35 @@ import asyncio
 import datetime as dt
 import subprocess
 from typing import Any, Optional
+from urllib.parse import urlparse
 
 from src.infrastructure.db_connection import get_dict_connection
 
 logger = logging.getLogger(__name__)
 
 YTDLP_TIMEOUT = int(os.environ.get("YTDLP_SEARCH_TIMEOUT", "45"))
+
+_YOUTUBE_HOSTS = frozenset({
+    "youtube.com", "www.youtube.com", "m.youtube.com",
+    "music.youtube.com", "youtu.be",
+})
+
+
+def _is_youtube_url(url: str) -> bool:
+    """Reject any non-YouTube host before it reaches a yt-dlp subprocess call.
+
+    "Channel URL" inputs (settings.channel_url, the inspect-channel query,
+    and the playlist-videos preview) are user-supplied and otherwise passed
+    straight into a yt-dlp target URL with no domain restriction — yt-dlp
+    supports extractors for hundreds of sites plus a generic page scraper,
+    so an unchecked host lets an authenticated user make the server fetch
+    arbitrary internal/external URLs on a daily cron schedule.
+    """
+    try:
+        host = (urlparse(url).hostname or "").lower()
+    except ValueError:
+        return False
+    return host in _YOUTUBE_HOSTS
 
 
 class AutopilotService:
@@ -487,6 +510,9 @@ class AutopilotService:
         norm = self.normalize_youtube_input(query)
         target_type = norm.get("type")
 
+        if target_type == "channel_url" and not _is_youtube_url(norm.get("url", "")):
+            raise ValueError("URL harus berupa link channel atau playlist YouTube yang valid")
+
         channel_info = {
             "channel_title": "",
             "channel_url": "",
@@ -649,6 +675,9 @@ class AutopilotService:
         if playlist_id:
             target_url = f"https://www.youtube.com/playlist?list={playlist_id}"
         elif channel_url:
+            if not _is_youtube_url(channel_url):
+                logger.warning(f"autopilot: rejected non-YouTube channel_url: {channel_url!r}")
+                return {"title": "", "target_url": "", "videos": [], "total": 0, "playlist_count": 0}
             c_url = channel_url.rstrip("/")
             target_url = c_url if c_url.endswith("/videos") else f"{c_url}/videos"
         else:
@@ -1229,6 +1258,20 @@ class AutopilotService:
                             updated_at = ?
                         WHERE user_id = ?
                     """, (now_iso, job_id, video_url, video_title, now_iso, user_id))
+
+                    # A manual target is a one-shot override: pick_candidate_from_
+                    # channel_or_playlist() returns it unconditionally, bypassing
+                    # processed_urls dedup entirely. Once the pinned video has
+                    # actually been submitted as a job, clear it — otherwise every
+                    # future run keeps re-picking (and re-bypassing dedup for) the
+                    # same video forever instead of resuming the configured
+                    # video_selection_strategy.
+                    if settings.get("manual_target_video_id") and candidate.get("id") == settings.get("manual_target_video_id"):
+                        conn.execute(
+                            "UPDATE autopilot_settings SET manual_target_video_id = '' WHERE user_id = ?",
+                            (user_id,),
+                        )
+
                     conn.commit()
                 except Exception as e:
                     logger.error(f"autopilot: Failed to record run in database: {e}")

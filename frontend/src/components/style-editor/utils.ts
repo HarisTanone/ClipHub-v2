@@ -18,6 +18,18 @@ export function useGoogleFont(fontFamily?: string) {
   }, [fontFamily]);
 }
 
+/**
+ * Coerce a style field that should be a finite number but may have been
+ * left as `false`/`undefined` (e.g. by an engine/preset-switch reset that
+ * cleared an unrelated boolean flag and this one by mistake) back to a
+ * safe default — `value ?? fallback` alone does not catch `false`, only
+ * `null`/`undefined`, and calling `.toFixed()`/arithmetic on a boolean
+ * throws or silently produces NaN.
+ */
+export function asFiniteNumber(value: unknown, fallback: number): number {
+  return typeof value === "number" && Number.isFinite(value) ? value : fallback;
+}
+
 export function getHookAnimationClass(animation: string): string {
   switch (animation) {
     case "fade_scale": return "animate-[fadeScalePreview_2.5s_ease-in-out_infinite]";

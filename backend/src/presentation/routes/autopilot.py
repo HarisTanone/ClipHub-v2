@@ -122,7 +122,10 @@ async def inspect_channel(
     if not query or not query.strip():
         raise HTTPException(status_code=400, detail="Query channel atau playlist tidak boleh kosong")
 
-    result = autopilot_service.inspect_channel_or_playlist(query.strip())
+    try:
+        result = autopilot_service.inspect_channel_or_playlist(query.strip())
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
     return {
         "success": True,
         "data": result,

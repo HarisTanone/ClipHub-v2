@@ -1364,8 +1364,18 @@ export function Settings() {
             updated.source_type = "playlist";
             updated.selected_playlist_id = res.data.direct_playlist.id;
             updated.selected_playlist_title = res.data.direct_playlist.title;
-          } else if (!updated.selected_playlist_id && res.data.playlists && res.data.playlists.length > 0) {
+          } else {
+            // Fresh channel inspection: always reset to this channel's
+            // uploads by default. Without this, a playlist selected while
+            // inspecting a PREVIOUS channel stays in state — the UI shows
+            // the newly inspected channel's info while source_type/
+            // selected_playlist_id still silently point at a playlist that
+            // belongs to a different channel entirely. The user can
+            // explicitly pick one of this channel's own playlists from the
+            // radio list below if they want.
             updated.source_type = "channel_videos";
+            updated.selected_playlist_id = "";
+            updated.selected_playlist_title = "";
           }
           setAutopilotSettings(updated);
           loadPlaylistVideosPreview(

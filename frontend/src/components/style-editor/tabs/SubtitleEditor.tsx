@@ -21,7 +21,7 @@ import {
   SUBTITLE_FONT_SUGGESTIONS,
   HIGHLIGHT_FONT_SUGGESTIONS,
 } from "../types";
-import { useGoogleFont, getPageItems, getSubAnimationClass } from "../utils";
+import { useGoogleFont, getPageItems, getSubAnimationClass, asFiniteNumber } from "../utils";
 import { Section, ColorPicker, RangeInput, Checkbox, SelectSmall } from "../ui/CommonControls";
 import { TimingOptionCard, MetaTile, FontChips } from "../ui/MetaTile";
 import { PaginationControls } from "../ui/PaginationControls";
@@ -44,9 +44,14 @@ function resetEngineScopedSubtitleKeys(style: SubtitleStyle): SubtitleStyle {
   const base = { ...style };
   (
     ["gradientEnabled", "glowEnabled", "dualStyleEnabled",
-     "highlightBold", "highlightScale", "shadowEnabled",
+     "highlightBold", "shadowEnabled",
      "strokeEnabled", "bgEnabled", "highlightGlow", "italic"] as const
   ).forEach((k) => { (base[k] as boolean | undefined) = false; });
+  // highlightScale is intentionally excluded: it's a universal highlight-size
+  // multiplier rendered via `.toFixed(1)` in every engine's tab, not an
+  // engine-specific effect — clearing it to undefined/false previously
+  // crashed the whole editor with "x.toFixed is not a function" the moment
+  // a tab using it (e.g. Skia) rendered.
   (["gradientFrom", "gradientTo", "glowColor", "bgColor", "bgOpacity",
     "bgRadius", "bgPadding", "shadowColor", "shadowBlur",
     "strokeColor", "strokeWidth"] as const).forEach((k) => { (base[k] as string | number | undefined) = undefined; });
@@ -539,7 +544,7 @@ export function SubtitleEditor({
                 <div className="rounded-lg border border-zinc-800 bg-zinc-950/50 p-3">
                   <Checkbox label="Active Word Scale" checked={style.highlightBold} onChange={(v) => update({ highlightBold: v })} />
                   <div className="mt-3 space-y-3">
-                    <RangeInput label={`Highlight Scale: ${style.highlightScale.toFixed(1)}x`} min={10} max={16} value={Math.round(style.highlightScale * 10)} onChange={(v) => update({ highlightScale: v / 10 })} />
+                    <RangeInput label={`Highlight Scale: ${asFiniteNumber(style.highlightScale, 1.2).toFixed(1)}x`} min={10} max={16} value={Math.round(asFiniteNumber(style.highlightScale, 1.2) * 10)} onChange={(v) => update({ highlightScale: v / 10 })} />
                     <Checkbox label="Text Outline / Stroke" checked={style.strokeEnabled} onChange={(v) => update({ strokeEnabled: v })} />
                     {style.strokeEnabled && (
                       <div className="mt-2 space-y-2">
@@ -701,7 +706,7 @@ export function SubtitleEditor({
                 ))}
               </div>
               <div className="grid grid-cols-3 gap-3">
-                <RangeInput label={`Scale: ${style.highlightScale.toFixed(1)}x`} min={10} max={20} value={Math.round(style.highlightScale * 10)} onChange={(v) => update({ highlightScale: v / 10 })} />
+                <RangeInput label={`Scale: ${asFiniteNumber(style.highlightScale, 1.2).toFixed(1)}x`} min={10} max={20} value={Math.round(asFiniteNumber(style.highlightScale, 1.2) * 10)} onChange={(v) => update({ highlightScale: v / 10 })} />
                 <div className="flex flex-col justify-end"><Checkbox label="Bold" checked={style.highlightBold} onChange={(v) => update({ highlightBold: v })} /></div>
                 <div className="flex flex-col justify-end"><Checkbox label="Glow" checked={style.highlightGlow} onChange={(v) => update({ highlightGlow: v })} /></div>
               </div>
@@ -1006,7 +1011,7 @@ export function SubtitleEditor({
                           const isKeyword = style.highlightWords.includes(w);
                           const shouldHighlight = isHighlight || isKeyword;
                           const useDual = shouldHighlight && style.dualStyleEnabled;
-                          const fs = Math.max((shouldHighlight ? (useDual ? style.highlightFontSize : style.fontSize * style.highlightScale) : style.fontSize) * 0.35, 10);
+                          const fs = Math.max((shouldHighlight ? (useDual ? style.highlightFontSize : style.fontSize * asFiniteNumber(style.highlightScale, 1.2)) : style.fontSize) * 0.35, 10);
                           const hlStyle = style.highlightStyle || "scale";
                           const wordStyles: React.CSSProperties = {
                             color: shouldHighlight ? style.highlightColor : style.color,

@@ -21,7 +21,7 @@ import {
   FONT_OPTIONS,
   HOOK_FONT_SUGGESTIONS,
 } from "../types";
-import { useGoogleFont, getPageItems, getPageForIndex } from "../utils";
+import { useGoogleFont, getPageItems, getPageForIndex, asFiniteNumber } from "../utils";
 import { Section, UnavailableHint, ColorPicker, RangeInput, Checkbox, SelectSmall } from "../ui/CommonControls";
 import { TimingOptionCard, FontChips } from "../ui/MetaTile";
 import { PaginationControls } from "../ui/PaginationControls";
@@ -43,11 +43,16 @@ function resetEngineScopedHookKeys(style: HookStyle): HookStyle {
     ["badgeEnabled", "decorativeElements", "footerEnabled", "lineEnabled",
      "boxEnabled", "gradientEnabled", "shadowEnabled", "glowEnabled", "italic"] as const
   ).forEach((k) => { (base[k] as boolean | undefined) = false; });
+  // motionIntensity is intentionally excluded: it's rendered via
+  // `.toFixed(1)` and is a universal motion-amount knob, not an
+  // engine-specific effect — clearing it to undefined previously crashed
+  // the editor with "x.toFixed is not a function" the same way highlightScale
+  // did in SubtitleEditor.
   (["badgeText", "footerText", "linePosition", "lineColor", "lineWidth",
     "lineThickness", "lineOffset", "boxColor", "boxOpacity", "boxPadding", "boxRadius",
     "gradientFrom", "gradientTo", "gradientAngle",
     "shadowColor", "shadowBlur", "shadowX", "shadowY",
-    "glowColor", "glowSize", "motionIntensity"] as const).forEach((k) => { (base[k] as any) = undefined; });
+    "glowColor", "glowSize"] as const).forEach((k) => { (base[k] as any) = undefined; });
   return base;
 }
 
@@ -556,7 +561,7 @@ export function HookEditor({
                   <div className="space-y-2">
                     <Checkbox label="Decorative motion elements" checked={style.decorativeElements} onChange={(v) => update({ decorativeElements: v })} disabled={!capabilities.decorative} />
                     {!capabilities.decorative && <UnavailableHint text="Style ini memakai motion utama tanpa dekorasi tambahan." />}
-                    <RangeInput label={`Motion: ${style.motionIntensity.toFixed(1)}x`} min={0} max={20} value={Math.round(style.motionIntensity * 10)} onChange={(v) => update({ motionIntensity: v / 10 })} />
+                    <RangeInput label={`Motion: ${asFiniteNumber(style.motionIntensity, 1).toFixed(1)}x`} min={0} max={20} value={Math.round(asFiniteNumber(style.motionIntensity, 1) * 10)} onChange={(v) => update({ motionIntensity: v / 10 })} />
                   </div>
                 </div>
 

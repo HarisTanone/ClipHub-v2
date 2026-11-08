@@ -485,6 +485,32 @@ def test_normalize_youtube_input():
     assert r5["playlist_id"] == "PLkiSnq8pdz9T3QQVbczz4XVgsHjjJK3vd"
 
 
+def test_inspect_channel_or_playlist_rejects_non_youtube_url():
+    """"Channel URL" input is otherwise passed straight into a yt-dlp target
+    with no domain restriction, which supports hundreds of sites plus a
+    generic scraper. An authenticated user must not be able to make the
+    server's yt-dlp subprocess fetch an arbitrary internal/external URL
+    (SSRF via a seemingly-innocuous "inspect channel" feature)."""
+    service = AutopilotService()
+    for evil_url in (
+        "https://169.254.169.254/latest/meta-data/",
+        "http://internal-admin.local/secret",
+        "https://evil.example.com/@fakehandle",
+    ):
+        with pytest.raises(ValueError, match="YouTube"):
+            service.inspect_channel_or_playlist(evil_url)
+
+
+def test_get_playlist_or_channel_videos_rejects_non_youtube_channel_url():
+    """Defense in depth: channel_url also reaches this function directly from
+    stored settings on every daily autopilot run (not just the one-off
+    inspect step), so it must independently reject non-YouTube hosts too."""
+    service = AutopilotService()
+    result = service.get_playlist_or_channel_videos(channel_url="https://evil.example.com/channel")
+    assert result["videos"] == []
+    assert result["target_url"] == ""
+
+
 def test_channel_playlist_candidate_selection_latest_2():
     """Test buffer 2 video strategy (processes vid 2 on day 1, then vid 1 on day 2)."""
     service = AutopilotService()
@@ -633,6 +659,60 @@ def test_channel_playlist_manual_target_override():
         cand = service.pick_best_candidate(user_id=user_id)
         assert cand is not None
         assert cand["id"] == "vid5"
+
+
+@pytest.mark.asyncio
+async def test_manual_target_video_id_cleared_after_successful_run():
+    """A manual target is a one-shot pin: pick_candidate_from_channel_or_playlist
+    returns it unconditionally, bypassing processed_urls dedup entirely. If it
+    is never cleared after the pinned video is actually submitted as a job,
+    every future run keeps re-picking (and re-bypassing dedup for) that same
+    video forever instead of resuming the configured strategy."""
+    service = AutopilotService()
+    user_id = 99
+    service.update_settings(user_id=user_id, data={
+        "enabled": 1,
+        "source_mode": "channel_playlist",
+        "source_type": "playlist",
+        "selected_playlist_id": "PL_sample_01",
+        "video_selection_strategy": "latest_2",
+        "manual_target_video_id": "vid_pinned",
+    })
+
+    candidate_video = {
+        "id": "vid_pinned",
+        "title": "Manually Pinned Video",
+        "url": "https://www.youtube.com/watch?v=vid_pinned",
+        "uploader": "Podcast Channel",
+        "duration_sec": 1200,
+        "views": 10000,
+        "virality_score": 85.0,
+    }
+
+    mock_job = MagicMock()
+    mock_job.id = "job_pinned_123"
+    mock_job_service = MagicMock()
+    mock_job_service.create_job = AsyncMock(return_value=mock_job)
+
+    with patch.object(service, "pick_best_candidate", return_value=candidate_video), \
+         patch("src.infrastructure.preset_resolver.resolve_preset", return_value={
+             "hook_style_config": {}, "subtitle_style_config": {},
+             "text_emphasis_style_config": {}, "text_emphasis_enabled": False,
+             "watermark_config": {}, "cta_config": {},
+         }), \
+         patch("src.infrastructure.hook_manifest.resolve_preset", return_value={
+             "slug": "default", "source": "user_preset",
+             "hook_style_config": {"engine": "remotion"},
+         }), \
+         patch("src.presentation.dependencies.get_job_service", return_value=mock_job_service), \
+         patch("src.infrastructure.telegram_service.TelegramService.send_message", new=AsyncMock()):
+        res = await service.run_autopilot_step(
+            user_id=user_id, force=False, trigger_source="cron", notify_telegram=False,
+        )
+        assert res["success"] is True
+
+    settings_after = service.get_settings(user_id)
+    assert settings_after["manual_target_video_id"] == ""
 
 
 
