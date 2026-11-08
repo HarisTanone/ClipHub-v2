@@ -383,15 +383,22 @@ class SkiaSubtitleRenderer:
                 shutil.copy2(video_path, output_path)
             return output_path
 
+        # Fail closed: a Skia render failure must not silently re-render this
+        # clip's subtitle through a different engine (legacy FFmpeg drawtext,
+        # or — if that also failed — the raw video with no subtitle at all).
+        # Every caller of render_subtitles() already catches exceptions here
+        # and logs/accounts for the failure (and, for the HyperFrames→Skia
+        # fallback path, explicitly re-tries another engine itself) — so
+        # raising is both safe and the only way those callers can see that
+        # the selected engine's visual output was never actually produced.
         try:
             res = self._render_with_pil(video_path, words, norm_style, output_path, start_offset)
-            if os.path.exists(output_path) and os.path.getsize(output_path) > 0:
-                return res
-            logger.warning("skia_subtitle: Pillow render did not produce valid output, falling back to FFmpeg drawtext")
-            return self._ffmpeg_fallback(video_path, words, norm_style, output_path, start_offset)
         except Exception as e:
-            logger.error(f"skia_subtitle: Pillow render failed ({e}), falling back to FFmpeg drawtext")
-            return self._ffmpeg_fallback(video_path, words, norm_style, output_path, start_offset)
+            logger.error(f"skia_subtitle: Pillow render failed: {e}")
+            raise RuntimeError(f"skia subtitle render failed: {e}") from e
+        if not os.path.exists(output_path) or os.path.getsize(output_path) == 0:
+            raise RuntimeError("skia subtitle render produced no output")
+        return res
 
     def _render_with_pil(
         self,
@@ -526,8 +533,9 @@ class SkiaSubtitleRenderer:
             logger.info("skia_subtitle: rendering '%s' (%s words/line, %s timing cuts) -> %s", style_id, max_words, len(concat_entries), out_base)
             res = subprocess.run(cmd, capture_output=True, text=True, timeout=max(180, int(video_dur * 3 + 60)))
             if res.returncode != 0:
-                logger.error(f"skia_subtitle FFmpeg overlay failed: {res.stderr[-400:]}")
-                return self._ffmpeg_fallback(video_path, words, style, output_path, start_offset)
+                stderr_tail = res.stderr[-400:]
+                logger.error(f"skia_subtitle FFmpeg overlay failed: {stderr_tail}")
+                raise RuntimeError(f"skia subtitle FFmpeg overlay failed: {stderr_tail}")
 
             logger.info(f"skia_subtitle: successfully composited → {output_path}")
             return output_path
@@ -1200,31 +1208,3 @@ class SkiaSubtitleRenderer:
             pass
         return 0.0
 
-    def _ffmpeg_fallback(
-        self,
-        video_path: str,
-        words: list,
-        style: dict,
-        output_path: str,
-        start_offset: float,
-    ) -> str:
-        """Graceful fallback to SubtitleRenderer if Pillow or FFmpeg overlay errors."""
-        try:
-            from src.infrastructure.subtitle_renderer import SubtitleRenderer
-            from src.domain.entities import SubtitleStyleConfig
-            renderer = SubtitleRenderer(font_dir=self._font_dir)
-            cfg = SubtitleStyleConfig.from_dict(style)
-            return renderer._render_line_only(
-                video_path=video_path,
-                words=words,
-                config=cfg,
-                output_path=output_path,
-                offset=start_offset,
-                timing_adj=0.0,
-            )
-        except Exception as e:
-            logger.error(f"skia_subtitle fallback failed: {e}")
-            if video_path != output_path and os.path.exists(video_path):
-                import shutil
-                shutil.copy2(video_path, output_path)
-            return output_path

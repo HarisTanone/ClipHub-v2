@@ -48,6 +48,7 @@ interface HookConfig {
   badgeEnabled?: boolean;
   badgeText?: string;
   badgeSubText?: string;
+  footerEnabled?: boolean;
   footerText?: string;
   decorativeElements?: boolean;
   motionIntensity?: number;
@@ -960,7 +961,8 @@ export const HookLayer: React.FC<HookLayerProps> = ({ text, config }) => {
         const cardBg = config.boxColor || "#FFFFFF";
         const accentColor = config.lineColor || "#DC2626"; // Crimson Red
         const categoryTag = badgeText || "INTERNASIONAL";
-        const footerLabel = (config as any).footerText || (config as any).badgeSubText || "READ MORE AT chatgpt.com";
+        const footerEnabled = config.footerEnabled !== false;
+        const footerLabel = config.footerText || (config as any).badgeSubText || "READ MORE AT chatgpt.com";
 
         return (
           <AbsoluteFill style={{ justifyContent: "center", alignItems: "center" }}>
@@ -1014,25 +1016,27 @@ export const HookLayer: React.FC<HookLayerProps> = ({ text, config }) => {
                 </div>
 
                 {/* Footer Brand Bar */}
-                <div style={{
-                  marginTop: 22,
-                  paddingTop: 14,
-                  borderTop: "1px solid rgba(0,0,0,0.08)",
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "space-between",
-                }}>
+                {footerEnabled && (
                   <div style={{
-                    color: "#52525B",
-                    fontFamily: "'Inter', sans-serif",
-                    fontWeight: 800,
-                    fontSize: 16,
-                    letterSpacing: "0.08em",
-                    textTransform: "uppercase",
+                    marginTop: 22,
+                    paddingTop: 14,
+                    borderTop: "1px solid rgba(0,0,0,0.08)",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "space-between",
                   }}>
-                    {footerLabel}
+                    <div style={{
+                      color: "#52525B",
+                      fontFamily: "'Inter', sans-serif",
+                      fontWeight: 800,
+                      fontSize: 16,
+                      letterSpacing: "0.08em",
+                      textTransform: "uppercase",
+                    }}>
+                      {footerLabel}
+                    </div>
                   </div>
-                </div>
+                )}
 
                 {/* Bottom Speech Notch Pointer */}
                 <div style={{

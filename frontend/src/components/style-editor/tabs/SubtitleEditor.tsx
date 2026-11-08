@@ -32,6 +32,32 @@ import { HfStyleGrid } from "../preview/HfStyleGrid";
 import { HfLivePreview } from "../preview/HfLivePreview";
 import { SkiaSubtitleLivePreview } from "../preview/SkiaSubtitleLivePreview";
 
+/**
+ * Clear engine/preset-scoped visual-effect keys before switching engine or
+ * preset, so a tab/preset switch never leaves a previous engine's stale
+ * overrides (gradient, glow, glassmorphism, stroke, background, dual-style,
+ * badges...) bleeding into the newly selected engine's render. Without this,
+ * "pilih tab skia" could still carry FFmpeg/other leftover fields into the
+ * payload sent to the backend alongside the new engine's own settings.
+ */
+function resetEngineScopedSubtitleKeys(style: SubtitleStyle): SubtitleStyle {
+  const base = { ...style };
+  (
+    ["gradientEnabled", "glowEnabled", "dualStyleEnabled",
+     "highlightBold", "highlightScale", "shadowEnabled",
+     "strokeEnabled", "bgEnabled", "highlightGlow", "italic"] as const
+  ).forEach((k) => { (base[k] as boolean | undefined) = false; });
+  (["gradientFrom", "gradientTo", "glowColor", "bgColor", "bgOpacity",
+    "bgRadius", "bgPadding", "shadowColor", "shadowBlur",
+    "strokeColor", "strokeWidth"] as const).forEach((k) => { (base[k] as string | number | undefined) = undefined; });
+  (base as Record<string, unknown>).glassmorphism = false;
+  (base as Record<string, unknown>).activeWordBadge = false;
+  (base as Record<string, unknown>).dualLayer = false;
+  (base as Record<string, unknown>).retroChrome = false;
+  (base as Record<string, unknown>).outlineStack = false;
+  return base;
+}
+
 export function SubtitleEditor({
   style,
   onChange,
@@ -160,7 +186,8 @@ export function SubtitleEditor({
             engine={engine}
             kind="subtitle"
             isSuperadmin={isSuperadmin}
-            onChange={(e) => update({
+            onChange={(e) => onChange({
+              ...resetEngineScopedSubtitleKeys(style),
               engine: e,
               hf_template: style.hf_template || defaultHfSubtitleId(),
             })}
@@ -172,7 +199,11 @@ export function SubtitleEditor({
             <HfStyleGrid
               items={HF_SUBTITLE_STYLES}
               activeId={hfId}
-              onSelect={(id) => update({ engine: "hyperframes", hf_template: id })}
+              onSelect={(id) => onChange({
+                ...resetEngineScopedSubtitleKeys(style),
+                engine: "hyperframes",
+                hf_template: id,
+              })}
             />
           </Section>
         ) : engine === "ffmpeg" ? (
@@ -191,7 +222,11 @@ export function SubtitleEditor({
                     key={p.id}
                     type="button"
                     onClick={() => {
-                      update({
+                      // Reset preset-scoped visual keys first so switching presets
+                      // (or arriving here from a different engine tab) never
+                      // leaves stale overrides behind.
+                      onChange({
+                        ...resetEngineScopedSubtitleKeys(style),
                         stylePreset: p.id,
                         color: p.color,
                         highlightColor: p.highlightColor,
@@ -370,22 +405,8 @@ export function SubtitleEditor({
                     onClick={() => {
                       // Reset preset-scoped visual keys first so switching presets
                       // never leaves stale overrides from the previous preset.
-                      const base = { ...style };
-                      (
-                        ["gradientEnabled", "glowEnabled", "dualStyleEnabled",
-                         "highlightBold", "highlightScale", "shadowEnabled",
-                         "strokeEnabled", "bgEnabled", "highlightGlow", "italic"] as const
-                      ).forEach((k) => { (base[k] as boolean | undefined) = false; });
-                      (["gradientFrom", "gradientTo", "glowColor", "bgColor", "bgOpacity",
-                        "bgRadius", "bgPadding", "shadowColor", "shadowBlur",
-                        "strokeColor", "strokeWidth"] as const).forEach((k) => { (base[k] as string | number | undefined) = undefined; });
-                      (base as Record<string, unknown>).glassmorphism = false;
-                      (base as Record<string, unknown>).activeWordBadge = false;
-                      (base as Record<string, unknown>).dualLayer = false;
-                      (base as Record<string, unknown>).retroChrome = false;
-                      (base as Record<string, unknown>).outlineStack = false;
                       update({
-                        ...base,
+                        ...resetEngineScopedSubtitleKeys(style),
                         stylePreset: p.id,
                         color: p.color,
                         highlightColor: p.highlightColor,

@@ -1910,12 +1910,16 @@ async def restyle_clip(
     stored_subtitle_manifest = root_style_data.get("resolved_subtitle_manifest")
     has_subtitle_override = bool(body and body.subtitle_style_config is not None)
     if has_subtitle_override:
-        subtitle_manifest = resolve_subtitle_manifest(subtitle_config)
+        subtitle_manifest = resolve_subtitle_manifest(
+            subtitle_config, user_id=getattr(job, "user_id", None), preset_slug=job.style_preset
+        )
     elif isinstance(stored_subtitle_manifest, dict):
         subtitle_manifest = stored_subtitle_manifest
     else:
         # Compatibility-only for jobs created before Subtitle manifests.
-        subtitle_manifest = resolve_subtitle_manifest(subtitle_config)
+        subtitle_manifest = resolve_subtitle_manifest(
+            subtitle_config, user_id=getattr(job, "user_id", None), preset_slug=job.style_preset
+        )
     subtitle_config = dict(subtitle_manifest["config"])
     subtitle_render_engine = subtitle_manifest["engine"]
     hook_text = (body.hook_text if body and body.hook_text else clip_data.get("hook", "")).strip()

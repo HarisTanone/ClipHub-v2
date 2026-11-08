@@ -60,12 +60,30 @@ export function SkiaSubtitleLivePreview({
             const currentIdx = activeWordIdx % words.length;
             const displayWords = isWordPop ? [words[currentIdx]] : isTyping ? words.slice(0, currentIdx + 1) : words;
 
-            // Card / Capsule background styles — mirror backend skia_subtitle_renderer:
-            // bg is "on" when bgEnabled OR bgOpacity > 0 OR the preset is a card preset.
-            const presetAlwaysBg = presetId === "glassmorphism" || presetId === "clean_editorial" || presetId === "podcast_pro" || presetId === "modern_mono";
+            // Preset-scoped visual-effect defaults — mirror backend
+            // skia_subtitle_renderer.py's _normalize_style() per-preset
+            // auto-enable allowlists exactly (OR'd with the explicit toggle,
+            // never overridden by an explicit false — these presets force
+            // the effect on by design), so the live preview never shows a
+            // plainer look than what the final bake actually renders.
+            const presetAlwaysBg = ["glassmorphism", "clean_editorial", "podcast_pro", "podcast_dialogue", "modern_mono", "tech_mono", "devon_clean", "glass_blur", "cinematic_bar"].includes(presetId);
+            const presetAlwaysGlow = ["glassmorphism", "podcast_pro", "neon_tube", "neon_glow", "modern_mono", "cinematic_slate", "fire_emphasis"].includes(presetId);
+            const presetAlwaysStroke = ["neon_tube", "neon_glow", "retro_chrome", "outline_stack", "hormozi_pop", "bold_impact", "bold_impact_stroke", "classic_karaoke", "fire_emphasis", "gold_luxury"].includes(presetId);
+            const presetAlwaysShadow = ["clean_editorial", "podcast_pro", "kinetic_word_box", "gradient_fill", "retro_chrome", "hormozi_pop", "bold_impact", "classic_karaoke", "fire_emphasis", "gold_luxury", "cinematic_slate"].includes(presetId);
+            const glowActive = !!style.glowEnabled || !!style.highlightGlow || presetAlwaysGlow;
+            const strokeActive = !!style.strokeEnabled || presetAlwaysStroke;
+            const shadowActive = !!style.shadowEnabled || presetAlwaysShadow;
+
             const hasBg = !!style.bgEnabled || (style.bgOpacity != null && style.bgOpacity > 0) || presetAlwaysBg;
             const bgOpacity = style.bgOpacity ?? (presetId === "glassmorphism" ? 0.25 : 0.75);
-            const bgHex = style.bgColor || (presetId === "podcast_pro" ? "#121216" : presetId === "modern_mono" ? "#080c14" : presetId === "clean_editorial" ? "#0f172a" : "#1e293b");
+            const bgHex = style.bgColor || (
+              presetId === "clean_editorial" || presetId === "devon_clean" ? "#0F172A"
+              : presetId === "podcast_pro" || presetId === "podcast_dialogue" ? "#121216"
+              : presetId === "modern_mono" || presetId === "tech_mono" ? "#090D16"
+              : presetId === "cinematic_bar" ? "#1A1A1A"
+              : presetId === "glass_blur" ? "#FFFFFF"
+              : "#1E293B"
+            );
             const bgAlpha = Math.round(Math.max(0, Math.min(1, bgOpacity)) * 255).toString(16).padStart(2, "0");
             const bgRadius = style.bgRadius ?? (presetId === "podcast_pro" ? 999 : presetId === "glassmorphism" ? 16 : 12);
             const bgPadding = style.bgPadding ?? 16;
@@ -155,11 +173,9 @@ export function SkiaSubtitleLivePreview({
                   // Text shadows & Glow
                   const glowColor = style.glowColor || style.highlightColor || "#00FFFF";
                   const shadowParts: string[] = [];
-                  if (shouldHighlight && style.glowEnabled) {
+                  if (shouldHighlight && glowActive) {
                     shadowParts.push(`0 0 10px ${glowColor}`, `0 0 20px ${glowColor}B3`);
-                  } else if (shouldHighlight && (presetId === "neon_tube" || presetId === "glassmorphism")) {
-                    shadowParts.push(`0 0 10px ${style.highlightColor || "#38BDF8"}`);
-                  } else if (style.shadowEnabled) {
+                  } else if (shadowActive) {
                     shadowParts.push(`0 0 ${style.shadowBlur || 8}px ${style.shadowColor || "#000000"}`);
                   } else {
                     shadowParts.push("0 2px 6px rgba(0,0,0,0.8)");
@@ -171,7 +187,7 @@ export function SkiaSubtitleLivePreview({
                     : 1.0;
 
                   // Stroke / Outline
-                  const strokeWidth = style.strokeEnabled ? (style.strokeWidth || 3) * 0.25 : 0;
+                  const strokeWidth = strokeActive ? (style.strokeWidth || 3) * 0.25 : 0;
                   const strokeColor = style.strokeColor || "#000000";
 
                   const wordStyle: React.CSSProperties = {

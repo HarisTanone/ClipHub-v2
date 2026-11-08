@@ -86,3 +86,67 @@ def test_existing_manifest_round_trips_without_re_resolving():
     assert again["preset_id"] == original["preset_id"]
     assert again["engine"] == original["engine"]
     assert again["subtitle_id"] == original["subtitle_id"]
+
+
+def test_missing_named_subtitle_preset_is_invalid_not_default():
+    with pytest.raises(SubtitleManifestError, match="not found"):
+        resolve_subtitle_manifest(None, user_id=987654, preset_slug="definitely-missing-preset")
+
+
+def test_empty_preset_slug_behaves_exactly_like_no_preset_slug():
+    """Backward compatibility: callers that don't pass preset_slug (every
+    call site before this fix) must get byte-identical behavior."""
+    with_slug = resolve_subtitle_manifest({"fontSize": 50}, user_id=1, preset_slug="")
+    without_slug = resolve_subtitle_manifest({"fontSize": 50})
+    assert with_slug == without_slug
+
+
+def test_partial_override_on_named_preset_inherits_preset_fields_not_generic_defaults(monkeypatch):
+    """A partial restyle override must inherit the rest of the NAMED preset's
+    fields (e.g. its glow/stroke/background look), not silently fall back to
+    the generic canonical default for every field the override omits — the
+    same "preset owns its config" contract resolve_hook_preset() already
+    enforces. This is what made a restyled clip's subtitle preset look
+    inconsistent with what the style editor showed for that preset."""
+    fake_preset = {
+        "slug": "my-neon-preset",
+        "id": "my-neon-preset",
+        "subtitle_style_config": {
+            "engine": "skia",
+            "stylePreset": "neon_tube",
+            "fontFamily": "Montserrat",
+            "glowEnabled": True,
+            "glowColor": "#00FFFF",
+            "strokeEnabled": True,
+        },
+    }
+    monkeypatch.setattr(
+        "src.infrastructure.preset_resolver.resolve_preset",
+        lambda slug, user_id=None: fake_preset if slug == "my-neon-preset" else None,
+    )
+
+    # Only fontSize is overridden — everything else must come from the preset.
+    manifest = resolve_subtitle_manifest(
+        {"fontSize": 60}, user_id=1, preset_slug="my-neon-preset"
+    )
+    assert manifest["config"]["fontFamily"] == "Montserrat"
+    assert manifest["config"]["glowEnabled"] is True
+    assert manifest["config"]["glowColor"] == "#00FFFF"
+    assert manifest["config"]["strokeEnabled"] is True
+    assert manifest["config"]["fontSize"] == 60
+    assert manifest["engine"] == "skia"
+
+
+def test_override_engine_conflicting_with_named_preset_engine_is_rejected(monkeypatch):
+    fake_preset = {
+        "slug": "my-ffmpeg-preset",
+        "subtitle_style_config": {"engine": "ffmpeg", "stylePreset": "classic_karaoke"},
+    }
+    monkeypatch.setattr(
+        "src.infrastructure.preset_resolver.resolve_preset",
+        lambda slug, user_id=None: fake_preset if slug == "my-ffmpeg-preset" else None,
+    )
+    with pytest.raises(SubtitleManifestError, match="conflicts with preset engine"):
+        resolve_subtitle_manifest(
+            {"engine": "skia"}, user_id=1, preset_slug="my-ffmpeg-preset"
+        )

@@ -407,7 +407,9 @@ class JobService:
             SUBTITLE_RENDERER_VERSION,
             resolve_subtitle_manifest,
         )
-        resolved_subtitle_manifest = resolve_subtitle_manifest(subtitle_style_config)
+        resolved_subtitle_manifest = resolve_subtitle_manifest(
+            subtitle_style_config, user_id=user_id, preset_slug=style_preset
+        )
         subtitle_style_config = dict(resolved_subtitle_manifest["config"])
 
         # Store style configs in clips_data for later use during render

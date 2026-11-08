@@ -114,6 +114,110 @@ async def test_render_via_direct_engines_final_path_defined(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_render_via_direct_engines_skips_one_pass_for_karaoke_and_emphasis(tmp_path):
+    """build_subtitle_filter_chain() (used by the 1-pass compositor) has no
+    per-word highlight for "karaoke" and no big-keyword handling for
+    "emphasis" — unlike SubtitleRenderer's multi-step implementations of the
+    same transitions. The 1-pass shortcut must not be used for these, or the
+    rendered subtitle looks different purely because hook_engine also
+    happens to be "ffmpeg", with no indication anything is wrong."""
+    output_dir = str(tmp_path)
+    clip_file = os.path.join(output_dir, "clip_01.mp4")
+    with open(clip_file, "wb") as f:
+        f.write(b"\x00" * 100)
+
+    clips = [Clip(rank=1, start=0.0, end=10.0, score=90, hook="", reason="Test")]
+    trim_results = {1: True}
+    clips_with_words = {1: [{"word": "Hello", "start": 3.5, "end": 4.0}]}
+
+    service = V2PipelineService.__new__(V2PipelineService)
+    service._emit = MagicMock()
+    service._emit_clip_progress = MagicMock()
+    service._repo = MagicMock()
+    service._repo.update_status = AsyncMock()
+    service._fonts_dir = "assets/fonts"
+
+    job = Job(job_id="job_karaoke_direct", youtube_url="http://example.com", clips_data={})
+
+    with patch(
+        "src.infrastructure.unified_ffmpeg_compositor.UnifiedFFmpegCompositor.render_single_pass",
+        new_callable=AsyncMock,
+    ) as mock_one_pass, patch.object(
+        SubtitleRenderer, "render_subtitles", return_value=os.path.join(output_dir, "clip_01_final.mp4")
+    ) as mock_multi_step:
+        await service._render_via_direct_engines(
+            job=job,
+            job_id="job_karaoke_direct",
+            clips=clips,
+            clips_with_words=clips_with_words,
+            output_dir=output_dir,
+            trim_results=trim_results,
+            hook_style_config={},
+            subtitle_style_config={"lineTransition": "karaoke"},
+            hook_engine="ffmpeg",
+            sub_engine="ffmpeg",
+        )
+        mock_one_pass.assert_not_called()
+        mock_multi_step.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_render_via_direct_engines_fails_closed_on_unsupported_hyperframes_engine(tmp_path):
+    """_render_via_direct_engines only implements FFmpeg/Skia. A
+    "hyperframes" engine reaching it (via the Remotion-failure fallback,
+    which preserves hyperframes rather than rewriting it to ffmpeg) must not
+    be silently rendered as plain FFmpeg drawtext — the clip should fail
+    (recorded, not crash the whole run) rather than publish the wrong
+    engine's visual output under a hyperframes selection."""
+    output_dir = str(tmp_path)
+    clip_file = os.path.join(output_dir, "clip_01.mp4")
+    with open(clip_file, "wb") as f:
+        f.write(b"\x00" * 100)
+
+    clips = [Clip(rank=1, start=0.0, end=10.0, score=90, hook="Awesome Hook Text", reason="Test")]
+    trim_results = {1: True}
+    # No words: subtitle block is skipped, isolating the failure to the
+    # hook-engine branch below.
+    clips_with_words = {}
+
+    service = V2PipelineService.__new__(V2PipelineService)
+    service._emit = MagicMock()
+    service._emit_clip_progress = MagicMock()
+    service._repo = MagicMock()
+    service._repo.update_status = AsyncMock()
+    service._fonts_dir = "assets/fonts"
+
+    job = Job(job_id="job_hf_fallback", youtube_url="http://example.com", clips_data={})
+
+    with patch(
+        "src.application.services.AutoClipService._render_hook_ffmpeg", new_callable=AsyncMock
+    ) as mock_ffmpeg_hook:
+        await service._render_via_direct_engines(
+            job=job,
+            job_id="job_hf_fallback",
+            clips=clips,
+            clips_with_words=clips_with_words,
+            output_dir=output_dir,
+            trim_results=trim_results,
+            hook_style_config={"animation": "hook_banner_v1"},
+            subtitle_style_config={},
+            hook_engine="hyperframes",
+            sub_engine="ffmpeg",
+        )
+        # The old binary check silently treated any non-"skia" hook_engine as
+        # "ffmpeg" here. It must never be invoked for "hyperframes".
+        mock_ffmpeg_hook.assert_not_called()
+
+    # The clip still gets a final file (hooked_path falls back to base_path
+    # on failure), but it must be the untouched base video — never a
+    # silently-substituted FFmpeg-rendered hook burned in under the hood.
+    final_path = os.path.join(output_dir, "clip_01_final.mp4")
+    assert os.path.exists(final_path)
+    with open(final_path, "rb") as f:
+        assert f.read() == b"\x00" * 100
+
+
+@pytest.mark.asyncio
 async def test_render_clips_fallback_when_remotion_offline(tmp_path):
     output_dir = str(tmp_path)
     clip_file = os.path.join(output_dir, "clip_01.mp4")
@@ -165,6 +269,117 @@ async def test_render_clips_fallback_when_remotion_offline(tmp_path):
         )
 
     assert not service._render_via_direct_engines.called
+
+
+@pytest.mark.asyncio
+async def test_remotion_failure_fallback_keeps_resolved_hook_animation(tmp_path):
+    """When Remotion fails mid-render and the clip falls back to a direct
+    engine (FFmpeg/Skia), the fallback must render the animation that was
+    actually resolved for this clip — not silently swap in
+    _render_via_direct_engines's own unrelated "zoom_punch" default because
+    hook_style_config never carried an explicit `animation` key for this
+    under-specified (e.g. legacy pre-manifest) clip."""
+    from types import SimpleNamespace
+    from src.domain.entities import CreativeDirection
+
+    output_dir = str(tmp_path)
+    (tmp_path / "clip_01.mp4").write_bytes(b"\x00" * 100)
+
+    clips = [Clip(rank=1, start=0.0, end=10.0, score=90, hook="Awesome Hook Text", reason="Test")]
+    trim_results = {1: True}
+    clips_with_words = {1: [{"word": "Hello", "start": 3.5, "end": 4.0}]}
+
+    remotion = AsyncMock()
+    remotion.render_clip.return_value = SimpleNamespace(success=False, error_message="boom", render_time_seconds=0.0)
+
+    service = V2PipelineService.__new__(V2PipelineService)
+    service._remotion_adapter = remotion
+    service._emit = MagicMock()
+    service._emit_clip_progress = MagicMock()
+    service._repo = MagicMock()
+    service._repo.update_status = AsyncMock()
+    service._fonts_dir = "assets/fonts"
+    service._render_via_direct_engines = AsyncMock()
+    service._build_broll_events = MagicMock(return_value=[])
+
+    job = Job(job_id="job_fallback_anim", youtube_url="http://example.com", clips_data={})
+
+    await service._render_via_remotion(
+        job=job,
+        job_id="job_fallback_anim",
+        clips=clips,
+        clips_with_words=clips_with_words,
+        creative_direction=CreativeDirection(hook_animation=""),
+        output_dir=output_dir,
+        trim_results=trim_results,
+        reframe_data={},
+        hook_style_config={},  # genuinely empty — no animation ever configured
+        subtitle_style_config={},
+        hook_engine="remotion",
+        sub_engine="remotion",
+    )
+
+    service._render_via_direct_engines.assert_awaited_once()
+    fallback_hook_cfg = service._render_via_direct_engines.await_args.args[6]
+    assert fallback_hook_cfg["animation"] == "podcast_lower_third"
+
+
+def test_emphasis_subtitle_style_never_calls_skia_when_ffmpeg_selected(tmp_path):
+    """line_transition="emphasis" previously called into SkiaSubtitleRenderer
+    unconditionally (regardless of the explicit "ffmpeg" engine selection),
+    discarding every FFmpeg-tab setting. Engine ownership is strict: picking
+    ffmpeg must render emphasis via pure FFmpeg drawtext, never Skia."""
+    from src.domain.entities import SubtitleStyleConfig
+
+    video_path = tmp_path / "clip.mp4"
+    video_path.write_bytes(b"\x00" * 10)
+
+    words = [
+        {"word": "Halo", "start": 0.2, "end": 0.6},
+        {"word": "semua", "start": 0.7, "end": 1.1},
+        {"word": "Jakarta", "start": 1.2, "end": 1.6},
+    ]
+    style = SubtitleStyleConfig(
+        engine="ffmpeg",
+        line_transition="emphasis",
+        font_family="Poppins",
+        font_size=36,
+        color="#FFFFFF",
+        highlight_color="#FFA500",
+        max_words_per_line=3,
+        stroke_width=2,
+        glow_enabled=True,
+    )
+
+    renderer = SubtitleRenderer(font_dir="assets/fonts")
+    with patch("src.infrastructure.skia_subtitle_renderer.SkiaSubtitleRenderer") as skia_cls, \
+         patch.object(SubtitleRenderer, "_run_ffmpeg", return_value=str(tmp_path / "out.mp4")) as run_ffmpeg:
+        out = renderer.render_subtitles(
+            video_path=str(video_path),
+            words=words,
+            style=style,
+            output_path=str(tmp_path / "out.mp4"),
+            start_offset=0.0,
+        )
+
+    skia_cls.assert_not_called()
+    run_ffmpeg.assert_called_once()
+    filter_parts = run_ffmpeg.call_args.args[2]
+    assert any("Jakarta" in part for part in filter_parts)
+    assert out == str(tmp_path / "out.mp4")
+
+
+def test_detect_emphasis_word_prefers_non_stopword_over_longer_stopword():
+    """_detect_emphasis_word scores stopwords (from the dynamic,
+    stop_words_store-backed SubtitleRenderer.STOP_WORDS — not a hardcoded
+    literal) lower than any non-stopword, regardless of raw length."""
+    renderer = SubtitleRenderer(font_dir="assets/fonts")
+    line = [
+        {"word": "sebagaimana"},  # long stopword
+        {"word": "Jakarta"},       # shorter, non-stopword
+    ]
+    idx = renderer._detect_emphasis_word(line)
+    assert line[idx]["word"] == "Jakarta"
 
 
 def test_skia_subtitle_renderer_glow_and_gradient_frame(tmp_path):
@@ -245,6 +460,33 @@ def test_skia_subtitle_renderer_full_video_with_glow(tmp_path):
     )
     assert os.path.exists(out_video)
     assert os.path.getsize(out_video) > 0
+
+
+def test_skia_subtitle_render_fails_closed_instead_of_silent_cross_engine_fallback(tmp_path):
+    """A Skia render failure must raise, never silently re-render through a
+    different engine (legacy FFmpeg drawtext, or a bare copy with zero
+    subtitles) while still reporting success — the caller's own error
+    handling (services_v2.py) is what decides what happens to the clip."""
+    from src.infrastructure.skia_subtitle_renderer import SkiaSubtitleRenderer
+
+    video_path = tmp_path / "in.mp4"
+    video_path.write_bytes(b"\x00" * 10)
+    out_path = tmp_path / "out.mp4"
+
+    renderer = SkiaSubtitleRenderer(font_dir="assets/fonts")
+    words = [{"word": "Halo", "start": 0.0, "end": 0.5}]
+
+    with patch.object(SkiaSubtitleRenderer, "_render_with_pil", side_effect=RuntimeError("boom")):
+        with pytest.raises(RuntimeError):
+            renderer.render_subtitles(
+                video_path=str(video_path),
+                words=words,
+                style={},
+                output_path=str(out_path),
+                start_offset=0.0,
+            )
+    assert not out_path.exists()
+    assert not hasattr(SkiaSubtitleRenderer, "_ffmpeg_fallback")
 
 
 @pytest.mark.asyncio
@@ -384,6 +626,44 @@ def test_resolve_engine_explicit_precedence():
     assert resolve_engine({"engine": "remotion", "stylePreset": "clean_editorial"}) == "remotion"
     assert resolve_engine({"engine": "skia", "animation": "paper_clip_scrap"}) == "skia"
     assert resolve_engine({"engine": "ffmpeg", "animation": "paper_clip_scrap"}) == "ffmpeg"
+
+
+def test_render_one_clip_trusts_resolved_hook_engine_over_animation_prefix(tmp_path):
+    """resolve_engine() sniffs a "hook_"-prefixed animation string to "hyperframes"
+    even when the stored engine is explicitly "remotion" (legacy HyperFrames
+    template ids like hook_banner_v1 left in hook_style_config). _render_clips
+    already resolved and trusts the canonical, persisted hook_engine — the
+    per-clip Remotion render must use that same value instead of re-deriving
+    it from hook_style_config via resolve_engine(), or it silently drops the
+    hook from the only pass that would have rendered it."""
+    from unittest.mock import AsyncMock
+    from types import SimpleNamespace
+    from src.domain.entities import CreativeDirection
+
+    (tmp_path / "clip_01.mp4").write_bytes(b"base")
+    remotion = AsyncMock()
+    remotion.render_clip.return_value = SimpleNamespace(success=True, render_time_seconds=0.1, error_message="")
+    service = V2PipelineService(
+        job_repo=AsyncMock(), downloader=AsyncMock(), renderer=AsyncMock(),
+        whisper_local=AsyncMock(), remotion_adapter=remotion,
+    )
+
+    asyncio.run(service._render_via_remotion(
+        job=Job(job_id="render3", youtube_url="upload://render3"),
+        job_id="render3",
+        clips=[Clip(rank=1, score=100, start=0, end=20, hook="Awesome Hook Text", reason="direct")],
+        clips_with_words={1: []},
+        creative_direction=CreativeDirection(),
+        output_dir=str(tmp_path),
+        trim_results={1: True},
+        reframe_data={},
+        hook_style_config={"engine": "remotion", "animation": "hook_banner_v1"},
+        subtitle_style_config={},
+        hook_engine="remotion",
+        sub_engine="remotion",
+    ))
+
+    assert remotion.render_clip.await_args.kwargs["hook_text"] == "Awesome Hook Text"
 
 
 

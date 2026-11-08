@@ -19,6 +19,7 @@ CANONICAL_SUBTITLE_DEFAULT_ID = "canonical-subtitle-neutral-v1"
 SUBTITLE_MANIFEST_VERSION = "1.0.0"
 SUBTITLE_RENDERER_VERSION = "subtitle-render-spec-v1"
 SUPPORTED_SUBTITLE_ENGINES = frozenset({"remotion", "hyperframes", "skia", "ffmpeg"})
+_EMPTY_SUBTITLE_PRESETS = frozenset({"", "default", "none", CANONICAL_SUBTITLE_DEFAULT_ID})
 
 
 class SubtitleManifestError(ValueError):
@@ -74,22 +75,60 @@ def _canonical_config(raw: Mapping[str, Any]) -> dict[str, Any]:
 
 def resolve_subtitle_manifest(
     explicit_config: Optional[Mapping[str, Any]],
+    *,
+    user_id: Optional[int] = None,
+    preset_slug: Optional[str] = None,
 ) -> dict[str, Any]:
     """Resolve one complete Subtitle manifest without visual fallback or inference.
 
-    - None / empty dict → canonical neutral Remotion preset.
+    - preset_slug identifies the named preset whose subtitle_style_config is
+      used as the base — the same "preset owns its config" contract as
+      resolve_hook_preset(). Every caller that knows which preset a job uses
+      (job creation, restyle) must pass it; otherwise a partial
+      explicit_config override silently falls back to the generic canonical
+      default for every field it omits, instead of inheriting the rest of
+      the preset's actual configuration — which produced a case where a
+      restyled clip's subtitle preset looked inconsistent with what the
+      style editor showed, while the equivalent Hook restyle (which already
+      re-anchors to job.style_preset) stayed correct.
+    - No preset_slug (or a default/empty slug) → canonical neutral FFmpeg preset.
     - Explicit engine must be one of the 4 supported values.
     - Engine is taken exclusively from cfg['engine']; prefix conventions are
       NOT used here — that logic lives in resolve_engine() for legacy compat only.
     - An already-resolved manifest (has 'version' key matching our version) is
       returned as-is (idempotent).
     """
-    raw = dict(explicit_config or {})
+    raw_override = dict(explicit_config or {})
 
     # Idempotency: already a resolved manifest → return unchanged
-    if raw.get("version") == SUBTITLE_MANIFEST_VERSION and "subtitle_id" in raw:
-        return raw
+    if raw_override.get("version") == SUBTITLE_MANIFEST_VERSION and "subtitle_id" in raw_override:
+        return raw_override
 
+    requested = str(preset_slug or "").strip()
+    key = requested.lower()
+    preset_id = CANONICAL_SUBTITLE_DEFAULT_ID
+    base: dict[str, Any] = {}
+
+    if key not in _EMPTY_SUBTITLE_PRESETS:
+        from src.infrastructure.preset_resolver import resolve_preset
+        resolved = resolve_preset(requested, user_id=user_id)
+        if not resolved or resolved.get("source") == "builtin_default":
+            raise SubtitleManifestError(f"Subtitle preset '{requested}' not found for user {user_id}")
+        preset_id = str(resolved.get("slug") or resolved.get("id") or requested)
+        base = deepcopy(resolved.get("subtitle_style_config") or {})
+        if not base:
+            raise SubtitleManifestError(f"Subtitle preset '{requested}' has no Subtitle configuration")
+
+    base_engine = str(base.get("engine") or "").strip().lower()
+    override_engine = str(raw_override.get("engine") or "").strip().lower()
+    # A named preset owns its engine and cannot be silently changed — same
+    # invariant resolve_hook_preset() enforces.
+    if key not in _EMPTY_SUBTITLE_PRESETS and override_engine and base_engine and override_engine != base_engine:
+        raise SubtitleManifestError(
+            f"Explicit Subtitle engine '{override_engine}' conflicts with preset engine '{base_engine}'"
+        )
+
+    raw = {**base, **raw_override}
     if not raw.get("engine"):
         raw["engine"] = "ffmpeg"
 
@@ -103,7 +142,7 @@ def resolve_subtitle_manifest(
     subtitle_id = template if engine == "hyperframes" else (style_preset or "classic_karaoke")
 
     manifest = SubtitleManifest(
-        preset_id=CANONICAL_SUBTITLE_DEFAULT_ID,
+        preset_id=preset_id,
         subtitle_id=subtitle_id,
         engine=engine,
         enabled=bool(cfg.get("enabled", True) is not False),

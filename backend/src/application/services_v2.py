@@ -75,6 +75,22 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
+def _with_resolved_hook_animation(hook_style_config: dict, resolved_animation: str) -> dict:
+    """Carry the animation already resolved for the attempted Remotion render
+    into a direct-engine (FFmpeg/Skia) fallback, instead of letting that path
+    re-derive its own default from a config that may lack an explicit
+    `animation` key. Without this, a Remotion failure on an under-specified
+    hook config silently swaps in a different default animation
+    (`_render_via_direct_engines`'s own "zoom_punch" fallback) than the one
+    that was actually about to render — the fallback output then looks
+    different from the canonical intent for no configured reason.
+    """
+    cfg = dict(hook_style_config or {})
+    if not cfg.get("animation") and resolved_animation:
+        cfg["animation"] = resolved_animation
+    return cfg
+
+
 class V2PipelineService:
     """V2 Pipeline orchestrator for non-premium users.
 
@@ -2319,6 +2335,8 @@ class V2PipelineService:
             hook_style_config, subtitle_style_config,
             text_emphasis_style_config,
             prosody_results=prosody_results or {},
+            hook_engine=hook_engine,
+            sub_engine=sub_engine,
         )
         # Post-Remotion HF overlays when user explicitly picked HF for hook and/or subtitle
         if hook_engine == "hyperframes" or sub_engine == "hyperframes":
@@ -2357,6 +2375,8 @@ class V2PipelineService:
         output_dir, trim_results, reframe_data,
         hook_style_config, subtitle_style_config, text_emphasis_style_config=None,
         prosody_results: dict | None = None,
+        hook_engine: str | None = None,
+        sub_engine: str | None = None,
     ) -> None:
         """Render all clips via Remotion server (parallel, max 2 concurrent)."""
         self._emit(job_id, 13, "remotion_render", "start")
@@ -2437,9 +2457,19 @@ class V2PipelineService:
                     or job.hook_style
                     or "podcast_lower_third"
                 )
+                # Trust the engine already resolved by the caller (_render_clips)
+                # from the canonical, persisted hook/subtitle manifest. Re-deriving
+                # it here from hook_style_config via resolve_engine() can disagree
+                # with that decision for legacy "hook_"-prefixed animation ids whose
+                # stored engine is "remotion" — resolve_engine() sniffs the prefix
+                # and returns "hyperframes", silently dropping the hook from this
+                # Remotion pass with no other pass left to render it.
                 from src.infrastructure.hf_style_catalog import resolve_engine as _resolve_eng, REMOTION_HOOK_ANIMATIONS
-                hook_eng = _resolve_eng(hook_style_config) if hook_style_config else ("remotion" if hook_style in REMOTION_HOOK_ANIMATIONS else "remotion")
-                sub_eng = _resolve_eng(subtitle_style_config)
+                hook_eng = hook_engine or (
+                    _resolve_eng(hook_style_config) if hook_style_config
+                    else ("remotion" if hook_style in REMOTION_HOOK_ANIMATIONS else "remotion")
+                )
+                sub_eng = sub_engine or _resolve_eng(subtitle_style_config)
                 sub_enabled = (subtitle_style_config or {}).get("enabled", True) is not False
                 # Remotion only renders hook & subtitles if engine is explicitly remotion.
                 # If engine is hyperframes, skia, or ffmpeg, it is handled exclusively by its dedicated pass.
@@ -2564,7 +2594,7 @@ class V2PipelineService:
                         await self._render_via_direct_engines(
                             job, job_id, [clip], clips_with_words,
                             output_dir, trim_results,
-                            hook_style_config, subtitle_style_config,
+                            _with_resolved_hook_animation(hook_style_config, hook_style), subtitle_style_config,
                             hook_engine=fallback_hook_eng,
                             sub_engine="ffmpeg" if sub_eng == "remotion" else sub_eng,
                         )
@@ -2578,7 +2608,7 @@ class V2PipelineService:
                         await self._render_via_direct_engines(
                             job, job_id, [clip], clips_with_words,
                             output_dir, trim_results,
-                            hook_style_config, subtitle_style_config,
+                            _with_resolved_hook_animation(hook_style_config, hook_style), subtitle_style_config,
                             hook_engine=fallback_hook_eng,
                             sub_engine="ffmpeg" if sub_eng == "remotion" else sub_eng,
                         )
@@ -2713,8 +2743,33 @@ class V2PipelineService:
                 blocked_ranges=te_ranges,
             ) if sub_enabled else []
 
-            # 1-pass FFmpeg compositor for FFmpeg hook + subtitles
-            if hook_engine == "ffmpeg" and sub_engine == "ffmpeg":
+            # 1-pass FFmpeg compositor for FFmpeg hook + subtitles.
+            #
+            # build_subtitle_filter_chain() (the 1-pass compositor's own
+            # subtitle filter builder) falls through a single generic branch
+            # for "karaoke"/"line_reveal"/"emphasis" that draws one flat line
+            # with no per-word active-word highlight — unlike the multi-step
+            # SubtitleRenderer path, whose karaoke renderer draws a dimmed
+            # base line plus a bright highlighted active word (with optional
+            # glow), and whose emphasis renderer draws a big emphasized
+            # keyword over a small context line. It also always prefers
+            # highlight_color over the user's chosen color for the line, so
+            # even a plain line_reveal line can render in the wrong color.
+            # Using the 1-pass shortcut for those transitions rendered a
+            # visibly different, flatter subtitle than SubtitleRenderer
+            # produces for the exact same subtitle_style_config — purely
+            # because hook_engine also happened to be "ffmpeg". Only take the
+            # 1-pass shortcut for transitions confirmed equivalent between the
+            # two implementations; everything else falls through to the
+            # multi-step pipeline below, which is always correct regardless
+            # of hook_engine.
+            sub_line_transition = str(
+                (clip_sub_config or {}).get("lineTransition")
+                or (clip_sub_config or {}).get("line_transition")
+                or "word_pop"
+            ).lower()
+            one_pass_subtitle_safe = (not words) or sub_line_transition in ("word_pop", "typing")
+            if hook_engine == "ffmpeg" and sub_engine == "ffmpeg" and one_pass_subtitle_safe:
                 from src.infrastructure.unified_ffmpeg_compositor import UnifiedFFmpegCompositor
                 compositor = UnifiedFFmpegCompositor(font_dir=fonts_dir)
                 watermark_cfg = (job.clips_data or {}).get("watermark_config") or {}
@@ -2759,7 +2814,7 @@ class V2PipelineService:
                             style_config=hook_style_config,
                         )
                         logger.info(f"[{job_id}] Skia hook rendered clip {clip.rank} style={hook_style}")
-                    else:
+                    elif hook_engine == "ffmpeg":
                         from src.application.services import AutoClipService
                         svc = AutoClipService.__new__(AutoClipService)
                         svc._fonts_dir = fonts_dir
@@ -2769,6 +2824,16 @@ class V2PipelineService:
                             style_config=hook_style_config,
                         )
                         logger.info(f"[{job_id}] {hook_engine} hook rendered clip {clip.rank}")
+                    else:
+                        # This direct-engine path only implements FFmpeg/Skia. A
+                        # "hyperframes" hook_engine reaching here (e.g. via the
+                        # per-clip Remotion-failure fallback) has no business
+                        # being rendered as FFmpeg drawtext by default — fail
+                        # closed instead of silently substituting the wrong
+                        # engine's visual output.
+                        raise RuntimeError(
+                            f"_render_via_direct_engines cannot render hook engine '{hook_engine}'"
+                        )
                 except Exception as e:
                     logger.warning(f"[{job_id}] {hook_engine} hook failed clip {clip.rank}: {e}")
                     errors.append(f"hook clip {clip.rank}: {e}")
@@ -2793,11 +2858,21 @@ class V2PipelineService:
                         renderer = SkiaSubtitleRenderer(font_dir=fonts_dir)
                         renderer.render_subtitles(hooked_path, words, clip_sub_config, final_path)
                         logger.info(f"[{job_id}] Skia subtitle rendered clip {clip.rank}")
-                    else:
+                    elif sub_engine == "ffmpeg":
                         renderer = SubtitleRenderer(font_dir=fonts_dir)
                         style_cfg = SubtitleStyleConfig.from_dict(clip_sub_config)
                         renderer.render_subtitles(hooked_path, words, style_cfg, final_path)
                         logger.info(f"[{job_id}] FFmpeg subtitle rendered clip {clip.rank}")
+                    else:
+                        # This direct-engine path only implements FFmpeg/Skia. A
+                        # "hyperframes" sub_engine reaching here (e.g. via the
+                        # per-clip Remotion-failure fallback) has no business
+                        # being rendered as FFmpeg drawtext by default — fail
+                        # closed instead of silently substituting the wrong
+                        # engine's visual output.
+                        raise RuntimeError(
+                            f"_render_via_direct_engines cannot render subtitle engine '{sub_engine}'"
+                        )
 
                     # Verify final_path exists; if not created by renderer, copy hooked_path
                     if not os.path.exists(final_path) or os.path.getsize(final_path) == 0:
@@ -2898,17 +2973,28 @@ class V2PipelineService:
                     for e in (getattr(clip, "text_emphasis_events", None) or [])
                     if float(e.get("end", 0)) > float(e.get("start", 0))
                 ]
-                if hook_engine == "ffmpeg" and sub_engine == "ffmpeg":
+                words_raw = clips_with_words.get(clip.rank) or []
+                sub_min = hook_dur if clip.hook else 0.0
+                words = sanitize_subtitle_words(
+                    words_raw,
+                    clip_dur,
+                    subtitle_min_start=sub_min,
+                    blocked_ranges=te_ranges,
+                )
+                # See the matching comment in _render_via_direct_engines: the
+                # 1-pass compositor's subtitle filter builder has no per-word
+                # highlight for karaoke/line_reveal and no emphasis handling,
+                # so only take the 1-pass shortcut for transitions it renders
+                # the same as the multi-step SubtitleRenderer path below.
+                sub_line_transition = str(
+                    (subtitle_style_config or {}).get("lineTransition")
+                    or (subtitle_style_config or {}).get("line_transition")
+                    or "word_pop"
+                ).lower()
+                one_pass_subtitle_safe = (not words) or sub_line_transition in ("word_pop", "typing")
+                if hook_engine == "ffmpeg" and sub_engine == "ffmpeg" and one_pass_subtitle_safe:
                     from src.infrastructure.unified_ffmpeg_compositor import UnifiedFFmpegCompositor
                     compositor = UnifiedFFmpegCompositor(font_dir=fonts_dir)
-                    words_raw = clips_with_words.get(clip.rank) or []
-                    sub_min = hook_dur if clip.hook else 0.0
-                    words = sanitize_subtitle_words(
-                        words_raw,
-                        clip_dur,
-                        subtitle_min_start=sub_min,
-                        blocked_ranges=te_ranges,
-                    )
                     tmp_composite = f"{output_dir}/clip_{clip.rank:02d}_direct_composite.mp4"
                     watermark_cfg = (job.clips_data or {}).get("watermark_config") or {}
                     cta_cfg = (job.clips_data or {}).get("cta_config") or getattr(job, "cta_config", None)

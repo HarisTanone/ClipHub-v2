@@ -30,6 +30,27 @@ import { HookPresetCard } from "../cards/HookPresetCard";
 import { HfStyleGrid } from "../preview/HfStyleGrid";
 import { NativeHookPreview } from "../preview/NativeHookPreview";
 
+/**
+ * Clear engine/preset-scoped visual-effect keys before switching engine or
+ * preset, so a tab/preset switch never leaves a previous engine's stale
+ * overrides (badge, footer, accent line, box panel, gradient, shadow, glow...)
+ * bleeding into the newly selected engine's render — the same "pilih tab X
+ * ya X saja" ownership issue already fixed for subtitles in SubtitleEditor.
+ */
+function resetEngineScopedHookKeys(style: HookStyle): HookStyle {
+  const base = { ...style };
+  (
+    ["badgeEnabled", "decorativeElements", "footerEnabled", "lineEnabled",
+     "boxEnabled", "gradientEnabled", "shadowEnabled", "glowEnabled", "italic"] as const
+  ).forEach((k) => { (base[k] as boolean | undefined) = false; });
+  (["badgeText", "footerText", "linePosition", "lineColor", "lineWidth",
+    "lineThickness", "lineOffset", "boxColor", "boxOpacity", "boxPadding", "boxRadius",
+    "gradientFrom", "gradientTo", "gradientAngle",
+    "shadowColor", "shadowBlur", "shadowX", "shadowY",
+    "glowColor", "glowSize", "motionIntensity"] as const).forEach((k) => { (base[k] as any) = undefined; });
+  return base;
+}
+
 export function HookEditor({
   style,
   onChange,
@@ -90,7 +111,8 @@ export function HookEditor({
             engine={engine}
             kind="hook"
             isSuperadmin={isSuperadmin}
-            onChange={(e) => update({
+            onChange={(e) => onChange({
+              ...resetEngineScopedHookKeys(style),
               engine: e,
               hf_template: style.hf_template || defaultHfHookId(),
             })}
@@ -103,7 +125,11 @@ export function HookEditor({
               <HfStyleGrid
                 items={HF_HOOK_STYLES}
                 activeId={hfId}
-                onSelect={(id) => update({ engine: "hyperframes", hf_template: id })}
+                onSelect={(id) => onChange({
+                  ...resetEngineScopedHookKeys(style),
+                  engine: "hyperframes",
+                  hf_template: id,
+                })}
               />
             </Section>
             <Section title="Hook Text">
@@ -129,6 +155,7 @@ export function HookEditor({
                     key={preset.id}
                     type="button"
                     onClick={() => update({
+                      ...resetEngineScopedHookKeys(style),
                       animation: preset.id,
                       color: preset.color,
                       fontSize: preset.fontSize,
@@ -297,6 +324,7 @@ export function HookEditor({
                     key={preset.id}
                     type="button"
                     onClick={() => update({
+                      ...resetEngineScopedHookKeys(style),
                       animation: preset.id,
                       color: preset.color,
                       fontSize: preset.fontSize,

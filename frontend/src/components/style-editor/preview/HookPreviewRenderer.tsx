@@ -279,7 +279,7 @@ export function HookPreviewRenderer({
       const cardBg = style.boxColor || "#FFFFFF";
       const accentColor = style.lineColor || "#DC2626";
       const categoryTag = style.badgeText || "INTERNASIONAL";
-      const footerLabel = style.footerText || "READ MORE AT chatgpt.com";
+      const footerLabel = style.footerText || (style as any).badgeSubText || "READ MORE AT chatgpt.com";
       const showBadge = style.badgeEnabled !== false;
       const showFooter = style.footerEnabled !== false;
       return (

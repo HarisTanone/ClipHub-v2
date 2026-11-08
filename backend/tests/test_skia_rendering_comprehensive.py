@@ -87,7 +87,13 @@ def test_skia_subtitle_renderer_style_normalization():
     assert normalized["glow_enabled"] is True
 
 
-def test_skia_subtitle_renderer_ffmpeg_fallback_invoked(tmp_path):
+def test_skia_subtitle_renderer_fails_closed_on_invalid_input(tmp_path):
+    """A Skia render failure (e.g. invalid/corrupt input video) must raise,
+    never silently re-render the clip's subtitle through a different engine
+    (legacy FFmpeg drawtext) while still reporting success. Engine ownership
+    is strict: the caller (services_v2.py) decides what happens to a clip
+    whose selected engine failed, not this renderer substituting a different
+    engine's visual output on its own."""
     renderer = SkiaSubtitleRenderer(font_dir="assets/fonts")
     input_video = os.path.join(tmp_path, "input.mp4")
     output_video = os.path.join(tmp_path, "output.mp4")
@@ -109,10 +115,10 @@ def test_skia_subtitle_renderer_ffmpeg_fallback_invoked(tmp_path):
     }
 
     with patch("src.infrastructure.subtitle_renderer.SubtitleRenderer._render_line_only") as mock_sub_render:
-        mock_sub_render.return_value = output_video
-        result = renderer.render_subtitles(input_video, words, style, output_video)
-        assert result == output_video
-        assert mock_sub_render.called
+        with pytest.raises(RuntimeError):
+            renderer.render_subtitles(input_video, words, style, output_video)
+        mock_sub_render.assert_not_called()
+    assert not os.path.exists(output_video)
 
 
 def test_skia_subtitle_renderer_autogrid_dynamic_centering(tmp_path):

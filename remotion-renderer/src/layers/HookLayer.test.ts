@@ -136,3 +136,28 @@ describe("HookLayer - Effect Layer Styles (Double-Render Prevention)", () => {
     expect(normalizeAnim("news-viralin-badge")).toBe("news_viralin_badge");
   });
 });
+
+describe("HookLayer - news_portal_pantau footer gating (preview/final parity)", () => {
+  // Simulate the news_portal_pantau footer logic from HookLayer
+  function getFooterState(config: { footerEnabled?: boolean; footerText?: string; badgeSubText?: string }) {
+    const footerEnabled = config.footerEnabled !== false;
+    const footerLabel = config.footerText || config.badgeSubText || "READ MORE AT chatgpt.com";
+    return { footerEnabled, footerLabel };
+  }
+
+  it("hides the footer bar when footerEnabled is explicitly false", () => {
+    const { footerEnabled } = getFooterState({ footerEnabled: false });
+    expect(footerEnabled).toBe(false);
+  });
+
+  it("shows the footer bar by default when footerEnabled is undefined (backward compat)", () => {
+    const { footerEnabled } = getFooterState({});
+    expect(footerEnabled).toBe(true);
+  });
+
+  it("falls back to badgeSubText then the default label when footerText is absent", () => {
+    expect(getFooterState({ badgeSubText: "sub text" }).footerLabel).toBe("sub text");
+    expect(getFooterState({}).footerLabel).toBe("READ MORE AT chatgpt.com");
+    expect(getFooterState({ footerText: "custom" }).footerLabel).toBe("custom");
+  });
+});

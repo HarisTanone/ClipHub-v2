@@ -98,18 +98,7 @@ class SubtitleRenderer(ISubtitleRenderer):
 
         # ── FFmpeg drawtext routing by line_transition ───────────────────────
         if config.line_transition == "emphasis":
-            return self.render_emphasis_style(
-                video_path=video_path,
-                words=words,
-                output_path=output_path,
-                start_offset=offset,
-                emphasis_color=config.highlight_color or "#FFA500",
-                normal_color=config.color or "#FFFFFF",
-                emphasis_font_size=int(config.font_size * 2.6),
-                normal_font_size=int(config.font_size * 0.8),
-                font_family=config.font_family,
-                glow_enabled=True,
-            )
+            return self._render_emphasis_style(video_path, words, config, output_path, offset, timing_adj)
 
         if config.line_transition == "typing":
             return self._render_typing_style(video_path, words, config, output_path, offset, timing_adj)
@@ -473,75 +462,113 @@ class SubtitleRenderer(ISubtitleRenderer):
     # ponytail: single source = skia_subtitle_renderer.STOP_WORDS backed by stop_words_store.
     from src.infrastructure.skia_subtitle_renderer import STOP_WORDS
 
-    def render_emphasis_style(
+    def _render_emphasis_style(
         self,
         video_path: str,
         words: list,
+        config: SubtitleStyleConfig,
         output_path: str,
-        start_offset: float = 0.0,
-        emphasis_color: str = "#FFA500",
-        normal_color: str = "#FFFFFF",
-        emphasis_font_size: int = 90,
-        normal_font_size: int = 28,
-        font_family: str = "Montserrat",
-        glow_enabled: bool = True,
+        offset: float,
+        timing_adj: float,
     ) -> str:
-        """Emphasis: big keyword + small context, Skia-first then drawtext fallback."""
+        """Big emphasized keyword + small context line, pure FFmpeg drawtext.
+
+        Engine ownership is strict: this is reached only when the top-level
+        engine routing in render_subtitles() already resolved to FFmpeg (or
+        Skia was selected but failed and fell back). It must not call into
+        SkiaSubtitleRenderer itself — doing so previously overrode an
+        explicit "ffmpeg" engine selection unconditionally, discarding every
+        FFmpeg-tab setting (stroke, background box, shadow, position) in
+        favor of a stripped-down Skia-only style dict.
+        """
         if not os.path.exists(video_path):
             return video_path
         if not words:
             return video_path
 
-        # Skia delegate for emphasis (better visual quality)
-        try:
-            from src.infrastructure.skia_subtitle_renderer import SkiaSubtitleRenderer
-            style_dict = {
-                "font_family": font_family,
-                "font_size": normal_font_size + 4,
-                "highlight_color": emphasis_color,
-                "text_color": normal_color,
-                "line_transition": "emphasis",
-                "glow_enabled": glow_enabled,
-            }
-            skia_renderer = SkiaSubtitleRenderer(font_dir=self._font_dir)
-            res = skia_renderer.render_subtitles(
-                video_path=video_path,
-                words=words,
-                style=style_dict,
-                output_path=output_path,
-                start_offset=start_offset,
-            )
-            if os.path.exists(output_path) and os.path.getsize(output_path) > 0:
-                return res
-        except Exception as e:
-            logger.warning(f"render_emphasis_style: Skia delegate failed ({e}), falling back to drawtext")
-
-        lines = self._group_words_into_lines(words, max_per_line=3)
+        lines = self._group_words_into_lines(words, config.max_words_per_line or 3)
         if not lines:
             return video_path
 
-        font_path = self._resolve_font(font_family, "Bold")
-        font_opt = f":fontfile={font_path}" if font_path else ""
-        y_pos = "h-text_h-120"
-        filter_parts = []
+        font_path = self._resolve_font(config.font_family, config.font_weight)
+        font_file_opt = f":fontfile={font_path}" if font_path else ""
+        y_pos = self._calculate_y_position(config)
+        stroke_color = config.stroke_color or "black"
+        stroke_opt = (
+            f":borderw={config.stroke_width}:bordercolor={stroke_color}"
+            if (config.stroke_width and config.stroke_width > 0) else ""
+        )
+        shadow_color = config.shadow_color or "black@0.5"
+        shadow_opt = (
+            f":shadowx={config.shadow_x}:shadowy={config.shadow_y}:shadowcolor={shadow_color}"
+            if (config.shadow_x or config.shadow_y) else ""
+        )
+        box_bg = config.background_opacity or (config.bg_opacity if hasattr(config, "bg_opacity") else 0.0)
+        box_opt = f":box=1:boxcolor=black@{box_bg}:boxborderw=8" if box_bg > 0 else ""
+        normal_font_size = max(1, int(config.font_size * 0.8))
+        emphasis_font_size = int(config.font_size * 2.6)
+        context_y = f"({y_pos})-{emphasis_font_size + 30}"
 
+        filter_parts = []
         for line in lines:
-            line_start = line[0]["start"] + start_offset
-            line_end = line[-1]["end"] + start_offset
-            line_text = " ".join(w["word"] for w in line)
-            escaped_line = self._escape_drawtext(line_text)
+            line_start = line[0]["start"] + offset + timing_adj
+            line_end = line[-1]["end"] + offset + timing_adj
+            emphasis_idx = self._detect_emphasis_word(line)
+
+            context_words = [w for i, w in enumerate(line) if i != emphasis_idx]
+            if context_words:
+                context_text = self._apply_text_case(
+                    " ".join(w["word"] for w in context_words), config
+                )
+                escaped_context = self._escape_drawtext(context_text)
+                filter_parts.append(
+                    f"drawtext=text='{escaped_context}'"
+                    f":fontsize={normal_font_size}"
+                    f"{font_file_opt}"
+                    f":fontcolor={config.color or '#FFFFFF'}"
+                    f"{stroke_opt}{shadow_opt}{box_opt}"
+                    f":x=(w-text_w)/2:y={context_y}"
+                    f":enable='between(t,{line_start:.3f},{line_end:.3f})'"
+                )
+
+            emphasis_text = self._apply_text_case(line[emphasis_idx]["word"], config)
+            escaped_emphasis = self._escape_drawtext(emphasis_text)
+
+            if getattr(config, "glow_enabled", False) or getattr(config, "highlight_glow", False):
+                glow_c = (
+                    getattr(config, "glow_color", None)
+                    or getattr(config, "highlight_glow_color", None)
+                    or config.highlight_color or "#FFA500"
+                )
+                filter_parts.append(
+                    f"drawtext=text='{escaped_emphasis}'"
+                    f":fontsize={int(emphasis_font_size * 1.08)}"
+                    f"{font_file_opt}"
+                    f":fontcolor={glow_c}@0.6"
+                    f":borderw={max(6, (config.stroke_width or 3) + 10)}:bordercolor={glow_c}@0.4"
+                    f":shadowx=0:shadowy=0:shadowcolor={glow_c}@0.8"
+                    f":x=(w-text_w)/2:y={y_pos}"
+                    f":enable='between(t,{line_start:.3f},{line_end:.3f})'"
+                )
+
+            active_stroke_w = (config.stroke_width + 2) if (config.stroke_width and config.stroke_width > 0) else 0
+            active_stroke_opt = f":borderw={active_stroke_w}:bordercolor={stroke_color}" if active_stroke_w > 0 else ""
             filter_parts.append(
-                f"drawtext=text='{escaped_line}'"
-                f":fontsize={normal_font_size + 4}"
-                f"{font_opt}"
-                f":fontcolor={normal_color}"
-                f":borderw=2:bordercolor=black@0.7"
+                f"drawtext=text='{escaped_emphasis}'"
+                f":fontsize={emphasis_font_size}"
+                f"{font_file_opt}"
+                f":fontcolor={config.highlight_color or '#FFA500'}"
+                f"{active_stroke_opt}{shadow_opt}"
                 f":x=(w-text_w)/2:y={y_pos}"
                 f":enable='between(t,{line_start:.3f},{line_end:.3f})'"
             )
 
         if not filter_parts:
             return video_path
+
+        if len(filter_parts) > 250:
+            logger.warning(f"subtitle_render: {len(filter_parts)} filters, falling back to line-only mode")
+            return self._render_line_only(video_path, words, config, output_path, offset, timing_adj)
 
         return self._run_ffmpeg(video_path, output_path, filter_parts, words, "emphasis")
 
