@@ -288,19 +288,41 @@ class JobService:
         if is_upload_source:
             pipeline_version = "v2"
 
+        # A completed/active job for this exact URL is only a valid cache hit
+        # for the CURRENT request if it was rendered with the style the
+        # caller actually asked for — otherwise reusing it silently hands
+        # back a video in a different style than requested, with no error
+        # and no indication the new style was never applied (e.g. re-running
+        # a previously-processed video with a new named preset returned the
+        # old video's old style outright).  No explicit style requested
+        # (empty/"default"/"none") still matches anything, since the caller
+        # didn't care which style they'd get.
+        _empty_style_keys = {"", "default", "none"}
+        requested_style_key = str(style_preset or "").strip().lower()
+
+        def _style_matches(candidate: Job) -> bool:
+            if requested_style_key in _empty_style_keys:
+                return True
+            return str(getattr(candidate, "style_preset", "") or "").strip().lower() == requested_style_key
+
         # URL deduplication
         if not is_upload_source and not force_reprocess and self._deduplicator:
             try:
                 cached = await self._deduplicator.check_dedup(youtube_url)
                 if cached:
                     existing = await self._repo.get_by_job_id(cached.job_id)
-                    if existing:
+                    if existing and _style_matches(existing):
                         return existing, True
+                    if existing:
+                        logger.info(
+                            f"URL dedup skipped for {youtube_url}: cached job {existing.job_id} "
+                            f"used style '{existing.style_preset}', request asked for '{style_preset}'"
+                        )
             except Exception as e:
                 logger.warning(f"URL dedup failed: {e}")
 
         existing = None if is_upload_source else await self._repo.get_by_url_active(youtube_url)
-        if existing:
+        if existing and _style_matches(existing):
             return existing, False
 
         job_id = self._generate_job_id()
