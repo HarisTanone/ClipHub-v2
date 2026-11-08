@@ -540,6 +540,73 @@ export function getTabFromRoute(sec?: string, subSec?: string, pathname?: string
   return "general";
 }
 
+type AutopilotTargetPreview = { video: AutopilotVideoItem; reason: string; isManual: boolean };
+
+/**
+ * Preview, for the "Target Hari Ini" card, of which video Autopilot's next
+ * run will pick for the "Channel & Playlist" source mode. This mirrors
+ * pick_candidate_from_channel_or_playlist() in autopilot_service.py
+ * (manual-target override, upcoming/premiere exclusion, duration filter with
+ * fallback-to-unfiltered-pool, then the per-strategy pick) — extracted as a
+ * pure function so the mirror can be unit tested directly instead of only
+ * being caught when it silently drifts from the backend (as happened when
+ * this preview omitted the duration filter and used a shallower video pool
+ * than the backend's own "all_playlist" fetch, so it showed a different
+ * video than what autopilot actually processed).
+ */
+export function computeAutopilotTargetPreview(
+  videos: AutopilotVideoItem[] | undefined | null,
+  settings: Pick<AutopilotSettings, "manual_target_video_id" | "min_duration_sec" | "max_duration_sec" | "video_selection_strategy"> | null | undefined,
+): AutopilotTargetPreview | null {
+  if (!videos || videos.length === 0) return null;
+  const manualId = settings?.manual_target_video_id;
+  if (manualId) {
+    const found = videos.find((v) => v.id === manualId);
+    if (found) return { video: found, reason: "Pilihan Manual", isManual: true };
+  }
+
+  const playable = videos.filter((v) => !v.is_upcoming);
+  if (playable.length === 0) return null;
+
+  const minDur = settings?.min_duration_sec ?? 480;
+  const maxDur = settings?.max_duration_sec ?? 3600;
+  const durationOk = (v: AutopilotVideoItem) => {
+    const d = v.duration_sec || 0;
+    return d <= 0 || (d >= minDur && d <= maxDur);
+  };
+  const filtered = playable.filter(durationOk);
+  const eligible = filtered.length > 0 ? filtered : playable;
+
+  const strat = settings?.video_selection_strategy || "latest_2";
+  if (strat === "latest_1" || strat === "latest") {
+    const v1 = eligible[0];
+    if (v1 && !v1.is_processed) {
+      return { video: v1, reason: "Video Terbaru (#1)", isManual: false };
+    }
+    return null;
+  }
+  if (strat === "latest_2") {
+    const v1 = eligible[0];
+    const v2 = eligible[1];
+    if (v2 && !v2.is_processed) {
+      return { video: v2, reason: "Buffer #2 (Terbaru Kedua)", isManual: false };
+    }
+    if (v1 && !v1.is_processed) {
+      return { video: v1, reason: "Buffer #1 (Terbaru)", isManual: false };
+    }
+    return null;
+  }
+  if (strat === "all_playlist") {
+    const unprocessed = eligible.filter((v) => !v.is_processed);
+    if (unprocessed.length > 0) {
+      const oldest = unprocessed[unprocessed.length - 1];
+      return { video: oldest, reason: "Antrean Backlog Tertua", isManual: false };
+    }
+    return null;
+  }
+  return null;
+}
+
 export function Settings() {
   const toast = useToast();
   const { user } = useAuth();
@@ -1217,7 +1284,15 @@ export function Settings() {
   async function loadPlaylistVideosPreview(playlistId?: string, channelUrl?: string, limitOverride?: number) {
     if (!playlistId && !channelUrl) return;
     setIsLoadingPlaylistVideos(true);
-    const limitToUse = limitOverride || playlistVideosLimit || 50;
+    // "all_playlist" (Antrean Backlog) processes the oldest unprocessed video
+    // across the WHOLE backlog — it needs visibility at least as deep as the
+    // backend's own fetch depth for that strategy
+    // (pick_candidate_from_channel_or_playlist uses limit=200), or "Target
+    // Hari Ini" here can show a completely different video than the one
+    // autopilot actually picks on its next run, simply because this preview
+    // never loaded far enough back to see the real oldest unprocessed video.
+    const strategyMinLimit = autopilotSettings?.video_selection_strategy === "all_playlist" ? 200 : 0;
+    const limitToUse = Math.max(limitOverride || playlistVideosLimit || 50, strategyMinLimit);
     try {
       const res = await autopilotApi.getPlaylistVideos({
         playlist_id: playlistId || undefined,
@@ -1299,47 +1374,10 @@ export function Settings() {
     }
   }
 
-  const currentTargetInfo = useMemo(() => {
-    if (!playlistVideosData?.videos || playlistVideosData.videos.length === 0) return null;
-    const allVideos = playlistVideosData.videos;
-    const manualId = autopilotSettings?.manual_target_video_id;
-    if (manualId) {
-      const found = allVideos.find((v) => v.id === manualId);
-      if (found) return { video: found, reason: "Pilihan Manual", isManual: true };
-    }
-
-    const playable = allVideos.filter((v) => !v.is_upcoming);
-    if (playable.length === 0) return null;
-
-    const strat = autopilotSettings?.video_selection_strategy || "latest_2";
-    if (strat === "latest_1" || strat === "latest") {
-      const v1 = playable[0];
-      if (v1 && !v1.is_processed) {
-        return { video: v1, reason: "Video Terbaru (#1)", isManual: false };
-      }
-      return null;
-    }
-    if (strat === "latest_2") {
-      const v1 = playable[0];
-      const v2 = playable[1];
-      if (v2 && !v2.is_processed) {
-        return { video: v2, reason: "Buffer #2 (Terbaru Kedua)", isManual: false };
-      }
-      if (v1 && !v1.is_processed) {
-        return { video: v1, reason: "Buffer #1 (Terbaru)", isManual: false };
-      }
-      return null;
-    }
-    if (strat === "all_playlist") {
-      const unprocessed = playable.filter((v) => !v.is_processed);
-      if (unprocessed.length > 0) {
-        const oldest = unprocessed[unprocessed.length - 1];
-        return { video: oldest, reason: "Antrean Backlog Tertua", isManual: false };
-      }
-      return null;
-    }
-    return null;
-  }, [playlistVideosData, autopilotSettings]);
+  const currentTargetInfo = useMemo(
+    () => computeAutopilotTargetPreview(playlistVideosData?.videos, autopilotSettings),
+    [playlistVideosData, autopilotSettings]
+  );
 
   async function handleInspectChannel(queryOverride?: string) {
     const q = (queryOverride !== undefined ? queryOverride : channelInput).trim();

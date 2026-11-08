@@ -562,6 +562,37 @@ def test_channel_playlist_candidate_selection_latest_2():
         assert c4["id"] == "vid0"
 
 
+def test_all_playlist_strategy_fetches_deeper_pool_than_latest_strategies():
+    """"all_playlist" (Antrean Backlog) processes the oldest unprocessed video
+    across the WHOLE backlog, so it must fetch a deeper pool than the
+    latest/latest_2 strategies (which only ever need the newest 1-2 videos).
+    A shallow fetch here was the root cause of a reported bug where the
+    client's "Target Hari Ini" preview (which mirrors this same fetch depth)
+    showed a completely different video than what autopilot actually
+    processed — the true oldest unprocessed video simply wasn't in the
+    shallow window either side fetched."""
+    service = AutopilotService()
+    user_id = 99
+
+    mock_fetch = MagicMock(return_value={"videos": [
+        {"id": f"vid{i}", "title": f"Video {i}", "url": f"https://www.youtube.com/watch?v=vid{i}", "duration_sec": 1200}
+        for i in range(1, 11)
+    ], "title": "Mock Show"})
+
+    with patch.object(service, "get_playlist_or_channel_videos", mock_fetch), \
+         patch.object(service, "get_processed_urls", return_value=set()):
+        service.update_settings(user_id=user_id, data={
+            "source_mode": "channel_playlist", "source_type": "playlist",
+            "selected_playlist_id": "PL_sample_01", "video_selection_strategy": "all_playlist",
+        })
+        service.pick_best_candidate(user_id=user_id)
+        assert mock_fetch.call_args.kwargs["limit"] == 200
+
+        service.update_settings(user_id=user_id, data={"video_selection_strategy": "latest_2"})
+        service.pick_best_candidate(user_id=user_id)
+        assert mock_fetch.call_args.kwargs["limit"] == 100
+
+
 def test_channel_playlist_candidate_selection_latest_1():
     """Test always take latest video strategy (vid1 directly)."""
     service = AutopilotService()

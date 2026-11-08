@@ -825,11 +825,18 @@ class AutopilotService:
         max_dur = settings.get("max_duration_sec", 3600)
         manual_target_id = str(settings.get("manual_target_video_id") or "").strip()
 
-        # 1. Fetch playlist or channel videos
+        # 1. Fetch playlist or channel videos. "all_playlist" explicitly means
+        # "process the entire backlog oldest-first" — it needs the deepest
+        # pool get_playlist_or_channel_videos supports (its own clamp caps
+        # this at 200) so the true oldest unprocessed video is actually
+        # reachable, not just the oldest one within whatever shallow window
+        # a flat limit happens to cover. latest_1/latest_2 only ever look at
+        # the newest 1-2 videos, so a shallower fetch is plenty for them.
+        fetch_limit = 200 if strategy in ("all_playlist",) else 100
         data = self.get_playlist_or_channel_videos(
             playlist_id=playlist_id if source_type == "playlist" else None,
             channel_url=channel_url if source_type != "playlist" or not playlist_id else None,
-            limit=100,
+            limit=fetch_limit,
             user_id=user_id,
         )
         videos = data.get("videos") or []
