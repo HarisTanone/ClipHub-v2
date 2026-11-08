@@ -692,3 +692,49 @@ def test_text_emphasis_fallback_phrase_relaxed_overlap():
     assert len(fallback["text"]) > 0
 
 
+
+
+def test_karaoke_highlight_word_positioned_at_its_real_offset_not_screen_center():
+    """Reported bug: a highlighted word in the middle of a multi-word line
+    (e.g. "Dia" in "Setelah Sadarkan Dia Pergi") rendered visually on top of
+    an unrelated word, because FFmpeg's `text_w` in a drawtext expression
+    only ever refers to that filter's OWN text — "(w-text_w)/2" on a single
+    word centers just that word on the whole screen, with no notion of
+    where it actually sits within the full line drawn by a separate
+    drawtext layer. The highlight overlay must instead be positioned at its
+    real pixel offset within the centered base line."""
+    renderer = SubtitleRenderer(font_dir="assets/fonts")
+    words = [
+        {"word": "Setelah", "start": 0.0, "end": 0.4},
+        {"word": "Sadarkan", "start": 0.4, "end": 0.8},
+        {"word": "Dia", "start": 0.8, "end": 1.1},
+        {"word": "Pergi", "start": 1.1, "end": 1.5},
+    ]
+    config = SubtitleStyleConfig(
+        font_family="Poppins", font_size=48, max_words_per_line=4,
+        line_transition="karaoke", color="#FFFFFF", highlight_color="#FFCC00",
+    )
+
+    with patch.object(SubtitleRenderer, "_run_ffmpeg", return_value="out.mp4") as mock_run:
+        renderer._render_karaoke_style("in.mp4", words, config, "out.mp4", 0.0, 0.0)
+
+    filter_parts = mock_run.call_args.args[2]
+    dia_layers = [f for f in filter_parts if "text='Dia'" in f]
+    setelah_layers = [f for f in filter_parts if "text='Setelah'" in f and "fontsize=48" not in f]
+    assert dia_layers, "expected a drawtext layer for the highlighted word 'Dia'"
+    assert setelah_layers, "expected a drawtext layer for the highlighted word 'Setelah'"
+
+    def x_expr(layer: str) -> str:
+        return layer.split(":x=")[1].split(":y=")[0]
+
+    dia_x = x_expr(dia_layers[0])
+    setelah_x = x_expr(setelah_layers[0])
+
+    # Neither highlighted word may use the bare screen-centering expression.
+    assert dia_x != "(w-text_w)/2"
+    assert setelah_x != "(w-text_w)/2"
+    # "Dia" (3rd word) must be offset further right than "Setelah" (1st
+    # word) — i.e. each word's highlight lands at its own distinct position
+    # within the line rather than every word collapsing to the same
+    # screen-centered spot.
+    assert dia_x != setelah_x

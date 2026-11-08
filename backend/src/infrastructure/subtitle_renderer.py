@@ -21,6 +21,8 @@ import tempfile
 from pathlib import Path
 from typing import Any, Optional
 
+from PIL import ImageFont
+
 from src.domain.entities import SubtitleStyleConfig
 from src.domain.interfaces import ISubtitleRenderer
 from src.infrastructure.gpu_encoder import get_video_encoder_args
@@ -33,6 +35,41 @@ class SubtitleRenderer(ISubtitleRenderer):
 
     def __init__(self, font_dir: str = "assets/fonts"):
         self._font_dir = font_dir
+        self._font_metrics_cache: dict[tuple[str, int], "ImageFont.FreeTypeFont"] = {}
+
+    def _load_metrics_font(self, font_path: Optional[str], font_size: int) -> Optional["ImageFont.FreeTypeFont"]:
+        """Load (and cache) the same font file/size FFmpeg's drawtext will
+        render with, purely to measure text width — PIL and FFmpeg both
+        rasterize via FreeType, so widths measured this way closely match
+        what drawtext actually renders."""
+        key = (font_path or "", font_size)
+        if key in self._font_metrics_cache:
+            return self._font_metrics_cache[key]
+        font = None
+        try:
+            if font_path:
+                font = ImageFont.truetype(font_path, font_size)
+            else:
+                font = ImageFont.load_default(size=font_size)
+        except Exception as e:
+            logger.warning(f"subtitle_render: could not load font for width measurement ({font_path}): {e}")
+        self._font_metrics_cache[key] = font
+        return font
+
+    def _measure_text_width(self, text: str, font_path: Optional[str], font_size: int) -> float:
+        """Pixel width of `text` rendered at `font_size` in `font_path`
+        (or FFmpeg's implicit default font if `font_path` is None)."""
+        if not text:
+            return 0.0
+        font = self._load_metrics_font(font_path, font_size)
+        if font is None:
+            # Last-resort heuristic if even the default font failed to load.
+            return len(text) * font_size * 0.55
+        try:
+            return float(font.getlength(text))
+        except Exception:
+            bbox = font.getbbox(text)
+            return float(bbox[2] - bbox[0])
 
     def _apply_text_case(self, text: str, config) -> str:
         if config.uppercase:
@@ -176,13 +213,43 @@ class SubtitleRenderer(ISubtitleRenderer):
                 f":enable='between(t,{line_start:.3f},{line_end:.3f})'"
             )
 
-            for w in line:
+            # The highlight overlay below is a SEPARATE drawtext layer drawn
+            # on top of the dim base line above. FFmpeg's `text_w` inside a
+            # drawtext expression only ever refers to that filter's OWN text
+            # ("(w-text_w)/2" on a single word centers just that word on the
+            # whole screen) — it has no notion of where that word actually
+            # sits within the full line rendered by a different drawtext
+            # instance. Blindly reusing "(w-text_w)/2" for the highlighted
+            # word therefore centers it on the screen regardless of its real
+            # position in the sentence, so for any line with more than one
+            # or two words the highlight visibly lands on top of an unrelated
+            # word instead of the one it's supposed to be highlighting.
+            # Fix: measure real pixel widths (same font file/size FFmpeg will
+            # render with) in Python, and position each highlighted word at
+            # its own left edge within the centered base line instead.
+            highlight_font_size = max(1, int(config.font_size * 1.15))
+            word_texts = [self._apply_text_case(w["word"], config) for w in line]
+            total_line_width = self._measure_text_width(line_text, font_path, config.font_size)
+
+            for idx, w in enumerate(line):
                 w_start = w["start"] + offset + timing_adj
                 w_end = w["end"] + offset + timing_adj
-                word_text = self._apply_text_case(w["word"], config)
+                word_text = word_texts[idx]
                 escaped_word = self._escape_drawtext(word_text)
                 active_stroke_w = (config.stroke_width + 1) if (config.stroke_width and config.stroke_width > 0) else 0
                 active_stroke_opt = f":borderw={active_stroke_w}:bordercolor={stroke_color}" if active_stroke_w > 0 else ""
+
+                prefix_text = " ".join(word_texts[:idx]) + (" " if idx > 0 else "")
+                prefix_width = self._measure_text_width(prefix_text, font_path, config.font_size)
+                word_base_width = self._measure_text_width(word_text, font_path, config.font_size)
+                word_highlight_width = self._measure_text_width(word_text, font_path, highlight_font_size)
+                # Left edge of this word within the base line, plus a
+                # recenter so the larger highlighted glyph grows symmetrically
+                # around the original word's center instead of only rightward.
+                word_x_expr = (
+                    f"(w-{total_line_width:.2f})/2+{prefix_width:.2f}"
+                    f"+{(word_base_width - word_highlight_width) / 2:.2f}"
+                )
 
                 if getattr(config, "glow_enabled", False) or getattr(config, "highlight_glow", False):
                     glow_c = (
@@ -192,22 +259,22 @@ class SubtitleRenderer(ISubtitleRenderer):
                     )
                     filter_parts.append(
                         f"drawtext=text='{escaped_word}'"
-                        f":fontsize={int(config.font_size * 1.15)}"
+                        f":fontsize={highlight_font_size}"
                         f"{font_file_opt}"
                         f":fontcolor={glow_c}@0.6"
                         f":borderw={max(6, (config.stroke_width or 3) + 8)}:bordercolor={glow_c}@0.4"
                         f":shadowx=0:shadowy=0:shadowcolor={glow_c}@0.8"
-                        f":x=(w-text_w)/2:y={y_pos}"
+                        f":x={word_x_expr}:y={y_pos}"
                         f":enable='between(t,{w_start:.3f},{w_end:.3f})'"
                     )
 
                 filter_parts.append(
                     f"drawtext=text='{escaped_word}'"
-                    f":fontsize={int(config.font_size * 1.15)}"
+                    f":fontsize={highlight_font_size}"
                     f"{font_file_opt}"
                     f":fontcolor={config.highlight_color or '#FFCC00'}"
                     f"{active_stroke_opt}{shadow_opt}"
-                    f":x=(w-text_w)/2:y={y_pos}"
+                    f":x={word_x_expr}:y={y_pos}"
                     f":enable='between(t,{w_start:.3f},{w_end:.3f})'"
                 )
 
