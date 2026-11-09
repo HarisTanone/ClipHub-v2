@@ -1398,7 +1398,15 @@ export function Settings() {
             channel_title: res.data.channel_title || "",
           };
 
-          if (res.data.is_direct_playlist && res.data.direct_playlist) {
+          if (res.data.is_multi) {
+            // Multiple comma-separated channels: always aggregate their
+            // "latest uploads" rather than drill into one specific playlist —
+            // picking a single playlist doesn't carry meaning across several
+            // distinct channels at once.
+            updated.source_type = "channel_videos";
+            updated.selected_playlist_id = "";
+            updated.selected_playlist_title = "";
+          } else if (res.data.is_direct_playlist && res.data.direct_playlist) {
             updated.source_type = "playlist";
             updated.selected_playlist_id = res.data.direct_playlist.id;
             updated.selected_playlist_title = res.data.direct_playlist.title;
@@ -1421,7 +1429,15 @@ export function Settings() {
             updated.channel_url
           );
         }
-        toast.success(`Berhasil menemukan: ${res.data.channel_title || q}`);
+        if (res.data.is_multi) {
+          const count = res.data.channels?.length || 0;
+          toast.success(`Berhasil menemukan ${count} channel: ${res.data.channel_title || q}`);
+          if (res.data.errors && res.data.errors.length > 0) {
+            toast.error(`${res.data.errors.length} entri dilewati (bukan URL YouTube yang valid): ${res.data.errors.map((e) => e.query).join(", ")}`);
+          }
+        } else {
+          toast.success(`Berhasil menemukan: ${res.data.channel_title || q}`);
+        }
       } else {
         toast.error("Gagal memeriksa channel. Pastikan handle atau URL YouTube valid.");
       }
@@ -3733,11 +3749,11 @@ export function Settings() {
                       {(autopilotSettings?.source_mode || "ai") === "ai" ? (
                         <div className="space-y-3 pt-1">
                           <p className="text-[11px] text-zinc-400">
-                            AI Hermes akan mencari video YouTube viral setiap pagi secara otomatis berdasarkan topik atau kata kunci niche Anda, memprioritaskan video dengan virality score tertinggi.
+                            AI Hermes akan mencari video YouTube viral setiap pagi secara otomatis berdasarkan topik atau kata kunci niche Anda, memprioritaskan video dengan virality score tertinggi. Bisa menggabungkan lebih dari satu topik/keyword, dipisahkan koma.
                           </p>
 
                           <div>
-                            <label className="text-[11px] text-zinc-400 block mb-1">Keywords / Niche Query</label>
+                            <label className="text-[11px] text-zinc-400 block mb-1">Keywords / Niche Query (bisa lebih dari 1, pisahkan dengan koma)</label>
                             <Input
                               value={autopilotSettings?.niche_query || ""}
                               onChange={(e) => {
@@ -3745,13 +3761,13 @@ export function Settings() {
                                   setAutopilotSettings({ ...autopilotSettings, niche_query: e.target.value });
                                 }
                               }}
-                              placeholder="Contoh: podcast bisnis, motivasi indonesia, tips trading crypto"
+                              placeholder="Contoh: podcast politik, podcast humor, podcast berita"
                             />
                           </div>
 
                           {/* Quick Niche Pills */}
                           <div>
-                            <span className="text-[10px] text-zinc-500 block mb-1.5">Rekomendasi Niche Cepat:</span>
+                            <span className="text-[10px] text-zinc-500 block mb-1.5">Rekomendasi Niche Cepat (klik untuk menambah/menghapus):</span>
                             <div className="flex flex-wrap gap-1.5">
                               {[
                                 "podcast bisnis",
@@ -3760,25 +3776,36 @@ export function Settings() {
                                 "gym motivation",
                                 "ai tech news",
                                 "self improvement",
-                              ].map((niche) => (
-                                <button
-                                  key={niche}
-                                  type="button"
-                                  onClick={() => {
-                                    if (autopilotSettings) {
-                                      setAutopilotSettings({ ...autopilotSettings, niche_query: niche });
-                                    }
-                                  }}
-                                  className={cn(
-                                    "px-2 py-0.5 rounded-md text-[10px] font-medium border transition-colors",
-                                    autopilotSettings?.niche_query === niche
-                                      ? "bg-violet-500/20 border-violet-500/50 text-violet-300"
-                                      : "bg-zinc-800/60 border-zinc-700/60 text-zinc-400 hover:text-zinc-200"
-                                  )}
-                                >
-                                  + {niche}
-                                </button>
-                              ))}
+                              ].map((niche) => {
+                                const activeKeywords = (autopilotSettings?.niche_query || "")
+                                  .split(",")
+                                  .map((s) => s.trim())
+                                  .filter(Boolean);
+                                const isActive = activeKeywords.includes(niche);
+                                return (
+                                  <button
+                                    key={niche}
+                                    type="button"
+                                    onClick={() => {
+                                      if (autopilotSettings) {
+                                        const next = isActive
+                                          ? activeKeywords.filter((k) => k !== niche)
+                                          : [...activeKeywords, niche];
+                                        setAutopilotSettings({ ...autopilotSettings, niche_query: next.join(", ") });
+                                      }
+                                    }}
+                                    className={cn(
+                                      "px-2 py-0.5 rounded-md text-[10px] font-medium border transition-colors inline-flex items-center gap-1",
+                                      isActive
+                                        ? "bg-violet-500/20 border-violet-500/50 text-violet-300"
+                                        : "bg-zinc-800/60 border-zinc-700/60 text-zinc-400 hover:text-zinc-200"
+                                    )}
+                                  >
+                                    {isActive ? <Check className="h-2.5 w-2.5" /> : <span>+</span>}
+                                    <span>{niche}</span>
+                                  </button>
+                                );
+                              })}
                             </div>
                           </div>
                         </div>
@@ -3786,13 +3813,13 @@ export function Settings() {
                         /* MODE 2: CHANNEL & PLAYLIST */
                         <div className="space-y-4 pt-1">
                           <p className="text-[11px] text-zinc-400">
-                            Masukkan username channel YouTube (misal: <code className="text-violet-300 font-mono">@tempovideochannel</code> atau <code className="text-violet-300 font-mono">tempovideochannel</code>) atau URL playlist khusus. Sistem akan otomatis menampilkan daftar playlist, podcast, dan acaranya.
+                            Masukkan username channel YouTube (misal: <code className="text-violet-300 font-mono">@tempovideochannel</code> atau <code className="text-violet-300 font-mono">tempovideochannel</code>) atau URL playlist khusus. Sistem akan otomatis menampilkan daftar playlist, podcast, dan acaranya. Bisa lebih dari 1 channel sekaligus, dipisahkan koma — semua video dari channel-channel tersebut akan digabungkan.
                           </p>
 
                           {/* Input Channel / Playlist with Search button */}
                           <div className="space-y-1.5">
                             <label className="text-[11px] text-zinc-300 font-medium block">
-                              Username Channel / Link YouTube / Link Playlist
+                              Username Channel / Link YouTube / Link Playlist (bisa lebih dari 1, pisahkan dengan koma)
                             </label>
                             <div className="flex gap-2">
                               <Input
@@ -3804,7 +3831,7 @@ export function Settings() {
                                     handleInspectChannel();
                                   }
                                 }}
-                                placeholder="Contoh: @tempovideochannel atau https://www.youtube.com/playlist?list=..."
+                                placeholder="Contoh: @channel1, @channel2, https://www.youtube.com/playlist?list=..."
                                 className="flex-1"
                               />
                               <Button
@@ -3859,7 +3886,7 @@ export function Settings() {
                                   </div>
                                 </div>
 
-                                {channelInspectData.channel_url && (
+                                {channelInspectData.channel_url && !channelInspectData.is_multi && (
                                   <a
                                     href={channelInspectData.channel_url}
                                     target="_blank"
@@ -3871,6 +3898,26 @@ export function Settings() {
                                   </a>
                                 )}
                               </div>
+
+                              {/* Multi-channel breakdown: shown instead of a single "Buka Channel" link
+                                  since channel_url/channel_title above are comma-joined summaries. */}
+                              {channelInspectData.is_multi && channelInspectData.channels && channelInspectData.channels.length > 0 && (
+                                <div className="flex flex-wrap gap-1.5 pt-2 border-t border-zinc-800/80">
+                                  {channelInspectData.channels.map((c, idx) => (
+                                    <a
+                                      key={c.channel_url || idx}
+                                      href={c.channel_url || undefined}
+                                      target="_blank"
+                                      rel="noreferrer"
+                                      title={c.channel_url}
+                                      className="text-[10px] text-violet-300 bg-violet-950/30 border border-violet-500/20 px-2 py-1 rounded-md flex items-center gap-1"
+                                    >
+                                      <Youtube className="h-2.5 w-2.5 shrink-0" />
+                                      <span className="truncate max-w-[140px]">{c.channel_title || c.channel_handle || c.channel_url}</span>
+                                    </a>
+                                  ))}
+                                </div>
+                              )}
 
                               {/* Source Sub-type Tabs: Channel Uploads vs Playlists */}
                               <div className="space-y-2 pt-1 border-t border-zinc-800/80">
@@ -3904,10 +3951,12 @@ export function Settings() {
                                     <Tv className="h-4 w-4 text-violet-400 shrink-0" />
                                     <div>
                                       <span className="font-semibold text-zinc-200 block text-[11px]">
-                                        Semua Video Terbaru Channel (Uploads)
+                                        {channelInspectData.is_multi ? "Semua Video Terbaru (Gabungan Channel)" : "Semua Video Terbaru Channel (Uploads)"}
                                       </span>
                                       <span className="text-[10px] text-zinc-500">
-                                        Otomatis mengambil rilisan video publik terbaru dari channel ini
+                                        {channelInspectData.is_multi
+                                          ? `Otomatis mengambil & menggabungkan rilisan video publik terbaru dari ${channelInspectData.channels?.length || 0} channel ini`
+                                          : "Otomatis mengambil rilisan video publik terbaru dari channel ini"}
                                       </span>
                                     </div>
                                   </div>

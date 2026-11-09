@@ -1468,6 +1468,12 @@ export interface AutopilotChannelInspectResult {
   direct_playlist?: AutopilotPlaylistItem | null;
   playlists: AutopilotPlaylistItem[];
   has_channel_videos: boolean;
+  /** true when the query held more than 1 comma-separated channel/playlist. */
+  is_multi?: boolean;
+  /** Per-channel breakdown. Always present (1 item when is_multi is false). */
+  channels?: AutopilotChannelInspectResult[];
+  /** Comma-separated entries that failed to resolve, skipped from "channels". */
+  errors?: { query: string; error: string }[];
 }
 
 export interface AutopilotVideoItem {
@@ -1488,6 +1494,9 @@ export interface AutopilotPlaylistVideosResult {
   videos: AutopilotVideoItem[];
   total: number;
   playlist_count?: number;
+  /** true when channel_url held more than 1 comma-separated channel. */
+  is_multi?: boolean;
+  channels?: { channel_url: string; title: string; total: number }[];
 }
 
 export interface AutopilotSettings {

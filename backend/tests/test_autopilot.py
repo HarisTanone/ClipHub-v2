@@ -1,4 +1,5 @@
 import asyncio
+import json
 import pytest
 import datetime as dt
 from unittest.mock import patch, AsyncMock, MagicMock
@@ -744,6 +745,173 @@ async def test_manual_target_video_id_cleared_after_successful_run():
 
     settings_after = service.get_settings(user_id)
     assert settings_after["manual_target_video_id"] == ""
+
+
+def test_inspect_channel_or_playlist_single_entry_not_multi():
+    """A single (no-comma) query must keep behaving exactly as before: is_multi=False
+    and a 1-item "channels" mirror that does NOT self-reference the outer dict (which
+    would break JSON serialization of the API response)."""
+    service = AutopilotService()
+    fake_result = {
+        "channel_title": "Solo Channel", "channel_url": "https://www.youtube.com/@solo",
+        "channel_handle": "@solo", "is_direct_playlist": False, "direct_playlist": None,
+        "playlists": [{"id": "p1", "title": "PL 1", "type": "playlist", "url": "u", "thumbnail": ""}],
+        "has_channel_videos": True,
+    }
+    with patch.object(service, "_inspect_single_channel_or_playlist", return_value=fake_result) as mock_single:
+        result = service.inspect_channel_or_playlist("@solo")
+
+    mock_single.assert_called_once_with("@solo")
+    assert result["is_multi"] is False
+    assert len(result["channels"]) == 1
+    assert result["channels"][0]["channel_title"] == "Solo Channel"
+    assert result["channels"][0] is not result  # no self-reference / circular dict
+    assert result["playlists"] == fake_result["playlists"]
+    json.dumps(result)  # must not raise on circular reference
+
+
+def test_inspect_channel_or_playlist_multi_aggregates():
+    """Comma-separated channels are each inspected independently and aggregated;
+    the first channel's info is mirrored at the top level for backward compatibility,
+    and playlist drill-down is intentionally empty since it doesn't carry meaning
+    across several distinct channels at once."""
+    service = AutopilotService()
+
+    def fake_single(query):
+        if query == "@chanA":
+            return {
+                "channel_title": "Channel A", "channel_url": "https://www.youtube.com/@chanA",
+                "channel_handle": "@chanA", "is_direct_playlist": False, "direct_playlist": None,
+                "playlists": [{"id": "p1", "title": "PL A", "type": "playlist", "url": "u", "thumbnail": ""}],
+                "has_channel_videos": True,
+            }
+        if query == "@chanB":
+            return {
+                "channel_title": "Channel B", "channel_url": "https://www.youtube.com/@chanB",
+                "channel_handle": "@chanB", "is_direct_playlist": False, "direct_playlist": None,
+                "playlists": [], "has_channel_videos": True,
+            }
+        raise ValueError("URL harus berupa link channel atau playlist YouTube yang valid")
+
+    with patch.object(service, "_inspect_single_channel_or_playlist", side_effect=fake_single):
+        result = service.inspect_channel_or_playlist("@chanA, @chanB")
+
+    assert result["is_multi"] is True
+    assert len(result["channels"]) == 2
+    assert result["channel_title"] == "Channel A, Channel B"
+    assert result["channel_url"] == "https://www.youtube.com/@chanA, https://www.youtube.com/@chanB"
+    assert result["playlists"] == []
+    json.dumps(result)
+
+
+def test_inspect_channel_or_playlist_multi_skips_invalid_entries():
+    """One bad entry among several comma-separated channels shouldn't fail the whole
+    request — it's skipped (reported in "errors") and the valid ones still aggregate."""
+    service = AutopilotService()
+
+    def fake_single(query):
+        if query == "@good":
+            return {
+                "channel_title": "Good Channel", "channel_url": "https://www.youtube.com/@good",
+                "channel_handle": "@good", "is_direct_playlist": False, "direct_playlist": None,
+                "playlists": [], "has_channel_videos": True,
+            }
+        raise ValueError("URL harus berupa link channel atau playlist YouTube yang valid")
+
+    with patch.object(service, "_inspect_single_channel_or_playlist", side_effect=fake_single):
+        result = service.inspect_channel_or_playlist("@good, https://evil.example.com/channel")
+
+    assert result["is_multi"] is True
+    assert len(result["channels"]) == 1
+    assert result["channel_title"] == "Good Channel"
+    assert len(result["errors"]) == 1
+    assert result["errors"][0]["query"] == "https://evil.example.com/channel"
+
+
+def test_get_playlist_or_channel_videos_dispatches_to_multi_channel_on_comma():
+    """channel_url with a comma must delegate to the multi-channel merge path instead
+    of being treated (and rejected) as a single malformed URL."""
+    service = AutopilotService()
+    with patch.object(service, "_get_multi_channel_videos", return_value={"videos": [], "is_multi": True}) as mock_multi:
+        service.get_playlist_or_channel_videos(
+            channel_url="https://www.youtube.com/@a, https://www.youtube.com/@b", limit=50,
+        )
+    mock_multi.assert_called_once()
+    called_urls = mock_multi.call_args.args[0]
+    assert called_urls == ["https://www.youtube.com/@a", "https://www.youtube.com/@b"]
+    assert mock_multi.call_args.kwargs["limit"] == 50
+
+
+def test_get_multi_channel_videos_round_robin_merge():
+    """Multiple channels' uploads must interleave (not concatenate), since per-channel
+    order reflects upload recency but there's no shared timestamp to sort globally."""
+    service = AutopilotService()
+
+    def fake_fetch(channel_url=None, playlist_id=None, limit=50, user_id=None):
+        if channel_url == "https://www.youtube.com/@chanA":
+            videos = [
+                {"id": f"a{i}", "url": f"https://www.youtube.com/watch?v=a{i}", "duration_sec": 100}
+                for i in range(3)
+            ]
+            return {"title": "Channel A", "videos": videos, "total": 3}
+        if channel_url == "https://www.youtube.com/@chanB":
+            videos = [
+                {"id": f"b{i}", "url": f"https://www.youtube.com/watch?v=b{i}", "duration_sec": 100}
+                for i in range(2)
+            ]
+            return {"title": "Channel B", "videos": videos, "total": 2}
+        return {"title": "", "videos": [], "total": 0}
+
+    with patch.object(service, "get_playlist_or_channel_videos", side_effect=fake_fetch):
+        result = service._get_multi_channel_videos(
+            ["https://www.youtube.com/@chanA", "https://www.youtube.com/@chanB"], limit=50,
+        )
+
+    assert [v["id"] for v in result["videos"]] == ["a0", "b0", "a1", "b1", "a2"]
+    assert result["is_multi"] is True
+    assert result["total"] == 5
+    assert result["title"] == "Channel A, Channel B"
+
+
+def test_pick_best_candidate_ai_discovery_multi_keyword_searches_each_keyword():
+    """niche_query with several comma-separated keywords must search each one and
+    merge results into a single candidate pool: once the first keyword's only video
+    is already processed, the second keyword must still be tried instead of giving up."""
+    service = AutopilotService()
+    user_id = 99
+    service.update_settings(user_id=user_id, data={
+        "niche_query": "podcast politik, podcast humor",
+    })
+
+    def fake_search(query, limit=8):
+        if query.startswith("podcast politik"):
+            return [{
+                "id": "vid_politik", "title": "Politik Terbaru",
+                "url": "https://youtube.com/watch?v=vid_politik", "uploader": "ChP",
+                "duration_sec": 1200, "views": 50000, "virality_score": 80.0,
+            }]
+        if query.startswith("podcast humor"):
+            return [{
+                "id": "vid_humor", "title": "Humor Segar",
+                "url": "https://youtube.com/watch?v=vid_humor", "uploader": "ChH",
+                "duration_sec": 1200, "views": 70000, "virality_score": 90.0,
+            }]
+        return []
+
+    searched_queries = []
+
+    def tracking_search(query, limit=8):
+        searched_queries.append(query)
+        return fake_search(query, limit)
+
+    with patch.object(service, "search_viral_videos", side_effect=tracking_search), \
+         patch.object(service, "get_processed_urls", return_value={"vid_politik"}):
+        candidate = service.pick_best_candidate(user_id=user_id)
+
+    assert candidate is not None
+    assert candidate["id"] == "vid_humor"
+    assert any(q.startswith("podcast politik") for q in searched_queries)
+    assert any(q.startswith("podcast humor") for q in searched_queries)
 
 
 

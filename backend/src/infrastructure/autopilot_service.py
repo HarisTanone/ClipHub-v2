@@ -47,6 +47,20 @@ def _is_youtube_url(url: str) -> bool:
     return host in _YOUTUBE_HOSTS
 
 
+def _split_multi_values(raw: Optional[str]) -> list[str]:
+    """Split a comma-separated settings value (channel_url, niche_query) into a
+    deduped, order-preserving list of trimmed entries. Single-value input (no comma)
+    still round-trips as a 1-item list, so callers don't need a separate code path."""
+    seen: set[str] = set()
+    result: list[str] = []
+    for part in (raw or "").split(","):
+        item = part.strip()
+        if item and item not in seen:
+            seen.add(item)
+            result.append(item)
+    return result
+
+
 class AutopilotService:
     def __init__(self):
         self._run_lock = asyncio.Lock()
@@ -506,7 +520,60 @@ class AutopilotService:
         }
 
     def inspect_channel_or_playlist(self, query: str) -> dict:
-        """Inspect a YouTube channel or playlist and return channel info, playlists, and podcasts."""
+        """Inspect one or more YouTube channels/playlists and return channel info,
+        playlists, and podcasts.
+
+        query may hold several comma-separated channel/playlist entries (e.g.
+        "@channel1, @channel2, https://youtube.com/playlist?list=..."). A single entry
+        behaves exactly as before. With more than one, each entry is inspected
+        independently and the results are aggregated: the first channel's fields are
+        mirrored at the top level for backward compatibility (is_multi=False callers
+        keep working unchanged), while the full per-channel breakdown is available
+        under "channels". Playlist drill-down doesn't carry meaning across several
+        distinct channels at once, so "playlists" is left empty when is_multi is True —
+        the UI should let the user pick a single channel from "channels" first if they
+        want its specific playlists.
+        """
+        entries = _split_multi_values(query)
+        if not entries:
+            raise ValueError("Query channel atau playlist tidak boleh kosong")
+
+        if len(entries) == 1:
+            single = self._inspect_single_channel_or_playlist(entries[0])
+            # Snapshot before adding is_multi/channels onto `single` itself, so
+            # `channels[0]` doesn't end up holding a self-reference back to `single`
+            # (which would blow up JSON serialization of the response with a
+            # circular-reference error).
+            channel_entry = dict(single)
+            single["is_multi"] = False
+            single["channels"] = [channel_entry]
+            return single
+
+        channels = []
+        errors = []
+        for entry in entries:
+            try:
+                channels.append(self._inspect_single_channel_or_playlist(entry))
+            except ValueError as exc:
+                errors.append({"query": entry, "error": str(exc)})
+                logger.warning(f"inspect_channel_or_playlist: skip invalid entry {entry!r}: {exc}")
+
+        if not channels:
+            raise ValueError("Tidak ada channel/playlist YouTube yang valid ditemukan dari input yang diberikan")
+
+        primary = dict(channels[0])
+        primary["is_multi"] = True
+        primary["channels"] = channels
+        primary["errors"] = errors
+        primary["channel_title"] = ", ".join(c.get("channel_title") or "?" for c in channels)
+        primary["channel_url"] = ", ".join(c.get("channel_url") or "" for c in channels if c.get("channel_url"))
+        primary["channel_handle"] = ", ".join(c.get("channel_handle") or "" for c in channels if c.get("channel_handle"))
+        primary["playlists"] = []
+        primary["has_channel_videos"] = True
+        return primary
+
+    def _inspect_single_channel_or_playlist(self, query: str) -> dict:
+        """Inspect a single YouTube channel or playlist and return channel info, playlists, and podcasts."""
         norm = self.normalize_youtube_input(query)
         target_type = norm.get("type")
 
@@ -671,7 +738,19 @@ class AutopilotService:
         limit: int = 50,
         user_id: Optional[int] = None,
     ) -> dict:
-        """Fetch videos for preview from a playlist or channel uploads."""
+        """Fetch videos for preview from a playlist or channel uploads.
+
+        channel_url may contain multiple comma-separated channel URLs/handles — each is
+        fetched independently and merged into a single deduplicated pool (see
+        _get_multi_channel_videos). playlist_id stays single-value: picking one specific
+        playlist is inherently a single-channel action.
+        """
+        if not playlist_id and channel_url:
+            channel_entries = _split_multi_values(channel_url)
+            if len(channel_entries) > 1:
+                return self._get_multi_channel_videos(channel_entries, limit=limit, user_id=user_id)
+            channel_url = channel_entries[0] if channel_entries else channel_url
+
         if playlist_id:
             target_url = f"https://www.youtube.com/playlist?list={playlist_id}"
         elif channel_url:
@@ -789,6 +868,62 @@ class AutopilotService:
             "videos": videos,
             "total": len(videos),
             "playlist_count": playlist_count or len(videos),
+        }
+
+    def _get_multi_channel_videos(
+        self,
+        channel_urls: list[str],
+        limit: int = 50,
+        user_id: Optional[int] = None,
+    ) -> dict:
+        """Fetch and merge channel uploads across several channels.
+
+        Each channel's own video list is already newest-first, but there is no shared
+        upload timestamp to globally sort by across different channels, so the merge
+        round-robins one video at a time from each channel in turn (channel1[0],
+        channel2[0], channel3[0], channel1[1], ...) instead of concatenating each
+        channel's full list, which would otherwise let one prolific channel push every
+        other channel's videos out of the capped preview/strategy window entirely.
+        """
+        per_channel_limit = max(1, min(200, limit))
+        per_channel_results = [
+            self.get_playlist_or_channel_videos(channel_url=url, limit=per_channel_limit, user_id=user_id)
+            for url in channel_urls
+        ]
+
+        merged: list[dict] = []
+        seen_keys: set[str] = set()
+        max_len = max((len(r.get("videos") or []) for r in per_channel_results), default=0)
+        for i in range(max_len):
+            for r in per_channel_results:
+                vids = r.get("videos") or []
+                if i >= len(vids):
+                    continue
+                v = vids[i]
+                key = v.get("id") or v.get("url")
+                if not key or key in seen_keys:
+                    continue
+                seen_keys.add(key)
+                merged.append(v)
+
+        merged = merged[: max(1, min(200, limit))]
+        for idx, v in enumerate(merged):
+            v["index"] = idx + 1
+
+        titles = [str(r.get("title") or "").strip() for r in per_channel_results]
+        combined_title = ", ".join(t for t in titles if t) or f"{len(channel_urls)} Channel"
+
+        return {
+            "title": combined_title,
+            "target_url": ", ".join(channel_urls),
+            "videos": merged,
+            "total": len(merged),
+            "playlist_count": len(merged),
+            "is_multi": True,
+            "channels": [
+                {"channel_url": url, "title": titles[idx], "total": per_channel_results[idx].get("total", 0)}
+                for idx, url in enumerate(channel_urls)
+            ],
         }
 
     def _format_candidate_from_video(self, v: dict) -> dict:
@@ -987,17 +1122,30 @@ class AutopilotService:
         if source_mode == "channel_playlist":
             return self.pick_candidate_from_channel_or_playlist(settings, processed_urls, user_id=user_id)
 
-        # AI Discovery mode
-        niche = settings.get("niche_query", "podcast bisnis")
+        # AI Discovery mode — niche_query may hold several comma-separated keywords
+        # (e.g. "podcast politik, podcast humor, podcast berita"), each searched
+        # independently and merged into one candidate pool.
+        niche_raw = str(settings.get("niche_query") or "podcast bisnis")
+        keywords = _split_multi_values(niche_raw) or ["podcast bisnis"]
         min_dur = settings.get("min_duration_sec", 480)
         max_dur = settings.get("max_duration_sec", 3600)
 
-        attempts = [
-            (niche, 10),
-            (f"{niche} viral shorts", 10),
-            (f"{niche} full", 15),
-            (f"{niche} terbaru", 15),
-        ]
+        if len(keywords) == 1:
+            niche = keywords[0]
+            attempts = [
+                (niche, 10),
+                (f"{niche} viral shorts", 10),
+                (f"{niche} full", 15),
+                (f"{niche} terbaru", 15),
+            ]
+        else:
+            # Fewer variants per keyword keeps the total number of yt-dlp search
+            # calls bounded as more keywords are added, instead of multiplying the
+            # single-keyword variant count by len(keywords).
+            attempts = []
+            for kw in keywords:
+                attempts.append((kw, 8))
+                attempts.append((f"{kw} terbaru", 8))
 
         total_searched = 0
         unprocessed: list[dict] = []
@@ -1028,7 +1176,7 @@ class AutopilotService:
             logger.info(
                 f"autopilot: {total_searched} candidates searched across "
                 f"{len(attempts)} query variants — all already processed for niche "
-                f"'{niche}' ({len(processed_urls)} processed URLs total)"
+                f"'{niche_raw}' ({len(processed_urls)} processed URLs total)"
             )
         return None
 

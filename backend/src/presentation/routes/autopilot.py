@@ -15,13 +15,13 @@ router = APIRouter(prefix="/autopilot", tags=["Autopilot"])
 class UpdateAutopilotSettingsRequest(BaseModel):
     enabled: Optional[bool] = None
     source_mode: Optional[str] = Field(None, description="Mode sumber video: 'ai' (AI Viral Search) atau 'channel_playlist' (Channel / Playlist Pilihan)")
-    channel_url: Optional[str] = Field(None, description="Username handle atau URL Channel YouTube")
+    channel_url: Optional[str] = Field(None, description="Username handle atau URL Channel YouTube. Bisa lebih dari 1, dipisahkan koma (contoh: '@channel1, @channel2')")
     channel_title: Optional[str] = Field(None, description="Nama Channel YouTube")
     source_type: Optional[str] = Field(None, description="Tipe sumber: 'channel_videos' atau 'playlist'")
     selected_playlist_id: Optional[str] = Field(None, description="ID Playlist yang dipilih")
     selected_playlist_title: Optional[str] = Field(None, description="Judul Playlist yang dipilih")
     video_selection_strategy: Optional[str] = Field(None, description="Strategi pemilihan video: 'latest_2' (buffer 2 video), 'latest_1' (video terbaru langsung), 'all_playlist'")
-    niche_query: Optional[str] = Field(None, description="Topik atau kata kunci pencarian video viral")
+    niche_query: Optional[str] = Field(None, description="Topik atau kata kunci pencarian video viral. Bisa lebih dari 1, dipisahkan koma (contoh: 'podcast politik, podcast humor')")
     preset_slug: Optional[str] = Field(None, description="Preset style slug untuk rendering klip")
     target_platforms: Optional[str] = Field(None, description="Comma-separated platform target (tiktok,instagram,youtube)")
     target_account_ids: Optional[List[str]] = Field(None, description="List spesifik account ID untuk target posting")
@@ -118,7 +118,8 @@ async def inspect_channel(
     query: str,
     user: CurrentUser = Depends(get_current_user),
 ):
-    """Inspect YouTube channel or playlist and return channel details and available playlists/shows/podcasts."""
+    """Inspect one or more YouTube channels/playlists (comma-separated) and return
+    channel details and available playlists/shows/podcasts."""
     if not query or not query.strip():
         raise HTTPException(status_code=400, detail="Query channel atau playlist tidak boleh kosong")
 
@@ -143,7 +144,11 @@ async def get_playlist_videos(
     limit: int = 50,
     user: CurrentUser = Depends(get_current_user),
 ):
-    """Fetch video preview list from a specific playlist or channel uploads."""
+    """Fetch video preview list from a specific playlist or channel uploads.
+
+    channel_url may be several comma-separated channel URLs/handles, in which case
+    their uploads are fetched and merged into a single preview pool.
+    """
     if not playlist_id and not channel_url:
         raise HTTPException(status_code=400, detail="Harap sediakan playlist_id atau channel_url")
 
