@@ -62,6 +62,7 @@ class InstantGenerateRequest(BaseModel):
     music_name: Optional[str] = None
     music_artist: Optional[str] = None
     music_thumbnail: Optional[str] = None
+    progress_token: Optional[str] = Field(None, max_length=100)
 
 
 class SuggestContentRequest(BaseModel):
@@ -126,6 +127,7 @@ class TriggerHermesRunRequest(BaseModel):
     slot_name: Optional[str] = "Manual Run"
     topic_override: Optional[str] = None
     count_override: Optional[int] = Field(None, ge=1, le=10)
+    progress_token: Optional[str] = Field(None, max_length=100)
 
 
 class SocialPublishRequest(BaseModel):
@@ -417,6 +419,7 @@ async def generate_instant(
             music_artist=req.music_artist,
             music_thumbnail=req.music_thumbnail,
             trigger_source="instant_studio",
+            progress_token=req.progress_token,
         )
         return {
             "success": True,
@@ -439,6 +442,7 @@ async def trigger_hermes_session(
     topic = req.topic_override or topics[0]
     count = req.count_override or settings_data.get("images_per_session", 2)
 
+    music_track = settings_data.get("music_track")
     try:
         result = await ai_image_studio_service.execute_generation_session(
             user_id=user.id,
@@ -448,11 +452,16 @@ async def trigger_hermes_session(
             aspect_ratio=settings_data.get("aspect_ratio", "9:16"),
             template_preset=settings_data.get("template_preset", "auto"),
             font_family=settings_data.get("font_family", "auto"),
+            model_name=settings_data.get("model_name", "auto"),
             background_source=settings_data.get("background_source", "ai_gemini"),
             media_type=settings_data.get("media_type", "image"),
+            footage_duration_sec=settings_data.get("footage_duration_sec", 8),
             auto_post=settings_data.get("auto_post_enabled", False),
             target_account_ids=settings_data.get("target_account_ids", []),
+            music_enabled=settings_data.get("music_enabled", False),
+            music_id=str(music_track) if (music_track and str(music_track).isdigit()) else None,
             trigger_source="manual_trigger",
+            progress_token=req.progress_token,
         )
         return {
             "success": True,
@@ -462,6 +471,18 @@ async def trigger_hermes_session(
     except Exception as e:
         logger.error(f"[AIImageStudio] Hermes session failed: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/progress/{token}")
+async def get_generation_progress(token: str, user: CurrentUser = Depends(get_current_user)):
+    """Poll live progress for a single generate/run request identified by a
+    client-generated token. Returns data=None if the token is unknown (not yet
+    started, already expired, or never used a progress_token)."""
+    state = ai_image_studio_service.get_progress(token)
+    return {
+        "success": True,
+        "data": state,
+    }
 
 
 @router.get("/history")
@@ -535,7 +556,7 @@ async def publish_run_to_social(
         logger.warning(f"[AIImageStudio] Failed to update ai_image_runs post status: {db_err}")
 
     return {
-        "success": status == "scheduled",
+        "success": status in ("scheduled", "partial"),
         "status": status,
         "details": details,
     }

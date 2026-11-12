@@ -244,6 +244,123 @@ async def test_social_dispatch_album_and_music(monkeypatch):
     assert payload2["additionalInfo"]["isAutoAddMusic"] is True
 
 
+@pytest.mark.asyncio
+async def test_social_dispatch_partial_status(monkeypatch):
+    """One account succeeding and one failing must report 'partial', not 'scheduled'/'failed'."""
+    from src.infrastructure.ai_image_studio_service import AIImageStudioService
+
+    async def mock_repliz_post(path, json_body=None):
+        if json_body["accountId"] == "acc_fail":
+            raise RuntimeError("Repliz rejected account")
+        return {"status": "ok", "scheduleId": "sch_ok"}
+
+    monkeypatch.setattr("src.presentation.routes.social.helpers.repliz_post", mock_repliz_post)
+
+    studio = AIImageStudioService()
+    status, details = await studio._dispatch_social_post(
+        account_ids=["acc_ok", "acc_fail"],
+        media_urls=["https://storage.com/img1.png"],
+        title="Mixed Result Post",
+        caption="Caption",
+        media_type="image",
+    )
+
+    assert status == "partial"
+    assert len(details["successes"]) == 1
+    assert len(details["failures"]) == 1
 
 
+def test_update_settings_creates_row_for_new_user():
+    """update_settings must upsert a row for a user that was never seeded,
+    otherwise non-first-user automation silently never persists."""
+    new_user_id = 991234
+
+    settings_before = ai_image_studio_service.get_settings(user_id=new_user_id)
+    assert settings_before["enabled"] is False
+
+    updated = ai_image_studio_service.update_settings(
+        user_id=new_user_id,
+        data={"enabled": True, "images_per_session": 4},
+    )
+    assert updated["enabled"] is True
+    assert updated["images_per_session"] == 4
+
+    # Re-fetch independently to confirm it was actually persisted, not just echoed back.
+    refetched = ai_image_studio_service.get_settings(user_id=new_user_id)
+    assert refetched["enabled"] is True
+    assert refetched["images_per_session"] == 4
+
+    # Cleanup
+    from src.infrastructure.db_connection import get_dict_connection
+    conn = get_dict_connection()
+    try:
+        conn.execute("DELETE FROM ai_image_settings WHERE user_id = ?", (new_user_id,))
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def test_claim_scheduled_slot_prevents_double_fire():
+    """_claim_scheduled_slot must let only the first caller win for the same
+    (user, date, slot) tuple — this is what stops multiple uvicorn workers
+    from double-posting the same scheduled Hermes slot."""
+    from src.infrastructure.db_connection import get_dict_connection
+
+    user_id, run_date, slot_name = 991235, "2099-01-01", "PytestSlot"
+
+    first = ai_image_studio_service._claim_scheduled_slot(user_id, run_date, slot_name)
+    second = ai_image_studio_service._claim_scheduled_slot(user_id, run_date, slot_name)
+
+    assert first is True
+    assert second is False
+
+    # Cleanup
+    conn = get_dict_connection()
+    try:
+        conn.execute(
+            "DELETE FROM ai_image_scheduler_claims WHERE user_id = ? AND run_date = ? AND slot_name = ?",
+            (user_id, run_date, slot_name),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def test_generation_progress_lifecycle():
+    """The progress panel polls get_progress(token); verify the full
+    init -> update -> finish lifecycle reports the states it should."""
+    token = "pytest-progress-token"
+
+    # Unknown token: no crash, just None.
+    assert ai_image_studio_service.get_progress("unknown-token-xyz") is None
+
+    ai_image_studio_service._progress_init(token, total=3, label="Menyusun konten AI...")
+    state = ai_image_studio_service.get_progress(token)
+    assert state["total"] == 3
+    assert state["completed"] == 0
+    assert state["status"] == "running"
+
+    ai_image_studio_service._progress_update(token, completed=1, label="Merender gambar 1/3...")
+    state = ai_image_studio_service.get_progress(token)
+    assert state["completed"] == 1
+    assert state["current_label"] == "Merender gambar 1/3..."
+
+    ai_image_studio_service._progress_finish(token, success=True)
+    state = ai_image_studio_service.get_progress(token)
+    assert state["status"] == "done"
+    assert state["completed"] == state["total"]
+
+    # A token that is never initialized (no progress_token passed by caller)
+    # must be a safe no-op, not an error.
+    ai_image_studio_service._progress_update(None, completed=1, label="noop")
+    ai_image_studio_service._progress_finish(None, success=True)
+
+
+def test_generation_progress_failure_records_error():
+    token = "pytest-progress-token-failed"
+    ai_image_studio_service._progress_init(token, total=1, label="Memulai...")
+    ai_image_studio_service._progress_finish(token, success=False, error="Gateway timeout")
+    state = ai_image_studio_service.get_progress(token)
+    assert state["status"] == "failed"
+    assert state["error"] == "Gateway timeout"
 

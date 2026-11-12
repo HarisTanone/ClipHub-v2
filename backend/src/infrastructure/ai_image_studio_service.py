@@ -24,7 +24,9 @@ import os
 import random
 import re
 import shutil
+import sqlite3
 import subprocess
+import time
 import uuid
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -64,8 +66,59 @@ class AIImageStudioService:
         os.makedirs(ASSETS_MUSIC_DIR, exist_ok=True)
         self._minio = MinioService()
         self._run_lock = asyncio.Lock()
-        self._last_scheduled_runs: dict[tuple[int, str, str], bool] = {}
+        self._progress_store: dict[str, dict[str, Any]] = {}
         self._ensure_tables()
+
+    # ─── Live Generation Progress (in-memory, polled by frontend panel) ──────
+    # Keyed by a client-generated token (one per generate/trigger request), not
+    # persisted — this only needs to survive the lifetime of a single browser
+    # session waiting on a single batch, not restarts or cross-worker sharing.
+
+    _PROGRESS_MAX_AGE_SEC = 3600
+
+    def _progress_prune(self) -> None:
+        if len(self._progress_store) <= 200:
+            return
+        cutoff = time.time() - self._PROGRESS_MAX_AGE_SEC
+        stale = [tok for tok, st in self._progress_store.items() if st.get("updated_at", 0) < cutoff]
+        for tok in stale:
+            self._progress_store.pop(tok, None)
+
+    def _progress_init(self, token: Optional[str], total: int, label: str) -> None:
+        if not token:
+            return
+        self._progress_prune()
+        self._progress_store[token] = {
+            "total": max(1, total),
+            "completed": 0,
+            "status": "running",
+            "current_label": label,
+            "error": None,
+            "updated_at": time.time(),
+        }
+
+    def _progress_update(self, token: Optional[str], completed: int, label: str) -> None:
+        if not token or token not in self._progress_store:
+            return
+        state = self._progress_store[token]
+        state["completed"] = completed
+        state["current_label"] = label
+        state["updated_at"] = time.time()
+
+    def _progress_finish(self, token: Optional[str], success: bool, error: Optional[str] = None) -> None:
+        if not token or token not in self._progress_store:
+            return
+        state = self._progress_store[token]
+        state["status"] = "done" if success else "failed"
+        if success:
+            state["completed"] = state["total"]
+            state["current_label"] = "Selesai"
+        if error:
+            state["error"] = error
+        state["updated_at"] = time.time()
+
+    def get_progress(self, token: str) -> Optional[dict[str, Any]]:
+        return self._progress_store.get(token)
 
     # ─── Dynamic Settings Resolution (Zero Hardcoding) ───────────────────────
 
@@ -171,6 +224,18 @@ class AIImageStudioService:
                 )
             """)
 
+            # Atomic cross-process claim table: prevents the same daily slot from
+            # firing twice when multiple uvicorn workers run the scheduler loop.
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS ai_image_scheduler_claims (
+                    user_id INTEGER NOT NULL,
+                    run_date TEXT NOT NULL,
+                    slot_name TEXT NOT NULL,
+                    claimed_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                    PRIMARY KEY (user_id, run_date, slot_name)
+                )
+            """)
+
             # Schema migration: ensure model_name column exists
             cur = conn.cursor()
             cur.execute("PRAGMA table_info(ai_image_settings)")
@@ -233,6 +298,14 @@ class AIImageStudioService:
         """Update image studio settings."""
         conn = get_dict_connection()
         try:
+            # Ensure a row exists for this user first — only user_id=1 is seeded at
+            # startup, so without this, settings for every other user silently
+            # no-op (UPDATE matches zero rows) and automation can never be enabled.
+            conn.execute(
+                "INSERT INTO ai_image_settings (user_id) VALUES (?) ON CONFLICT(user_id) DO NOTHING",
+                (user_id,),
+            )
+
             fields = []
             values = []
             allowed_keys = [
@@ -673,6 +746,7 @@ class AIImageStudioService:
         model_name: Optional[str] = None,
         background_source: str = "ai_gemini",
         media_type: str = "image",
+        footage_duration_sec: int = 8,
         custom_prompt: str = "",
         quote_hook: str = "",
         quote_headline: str = "",
@@ -688,9 +762,13 @@ class AIImageStudioService:
         music_artist: Optional[str] = None,
         music_thumbnail: Optional[str] = None,
         trigger_source: str = "manual",
+        progress_token: Optional[str] = None,
     ) -> dict[str, Any]:
         """Execute a full generation batch, record run, and optionally auto-post."""
         async with self._run_lock:
+            progress_total = 1 if media_type == "video_footage" else max(1, image_count)
+            self._progress_init(progress_token, total=progress_total, label="Menyusun konten AI...")
+
             # 1. Fallback topic if empty
             if not topic:
                 s = self.get_settings(user_id)
@@ -735,21 +813,38 @@ class AIImageStudioService:
                         aspect_ratio=aspect_ratio,
                         accent_color=accent_color,
                     )
-                    v_path, v_url = await self.render_video_footage_item(topic, content)
+                    self._progress_update(progress_token, completed=0, label="Merender video footage...")
+                    v_path, v_url = await self.render_video_footage_item(
+                        topic, content, footage_duration_sec=footage_duration_sec
+                    )
                     local_paths.append(v_path)
                     video_url = v_url
                     public_urls.append(v_url)
+                    self._progress_update(progress_token, completed=1, label="Video footage selesai dirender")
                 else:
                     for i in range(max(1, image_count)):
                         slide_idx = f"0{i + 1} / 0{image_count}" if image_count > 1 else ""
-                        item_headline = (
-                            headline if i == 0
-                            else f"Bagian {i + 1}: Kunci konsistensi tanpa membiarkan keraguan menghentikan langkahmu."
-                        )
+                        if i == 0:
+                            item_headline = headline
+                            item_body = body_text
+                        else:
+                            # Generate a fresh, topic-specific supporting slide via AI
+                            # instead of reusing a static filler string for every carousel.
+                            self._progress_update(
+                                progress_token, completed=i,
+                                label=f"Menyusun teks slide {i + 1}/{image_count}...",
+                            )
+                            variant = self.suggest_quote_content(
+                                f"{topic} — carousel slide {i + 1} of {image_count}, continuing the main quote "
+                                f"\"{headline}\". Provide a fresh complementary supporting insight for this slide, "
+                                f"written as a new short statement, not a repeat of the main quote."
+                            )
+                            item_headline = variant["headline"]
+                            item_body = variant["body"]
                         content = TypographyContent(
                             hook=hook,
                             headline=item_headline,
-                            body=body_text if i == 0 else "Fokus pada apa yang bisa kamu kendalikan hari ini.",
+                            body=item_body,
                             author=author,
                             handle=quote_handle,
                             slide_index=slide_idx,
@@ -757,6 +852,10 @@ class AIImageStudioService:
                             font_family=font_name,
                             aspect_ratio=aspect_ratio,
                             accent_color=accent_color,
+                        )
+                        self._progress_update(
+                            progress_token, completed=i,
+                            label=f"Merender gambar {i + 1}/{image_count}...",
                         )
                         l_path, p_url = await self.render_image_item(
                             topic=topic,
@@ -767,11 +866,19 @@ class AIImageStudioService:
                         )
                         local_paths.append(l_path)
                         public_urls.append(p_url)
+                        self._progress_update(
+                            progress_token, completed=i + 1,
+                            label=f"Gambar {i + 1}/{image_count} selesai",
+                        )
 
                 # 4. Social Auto Post if requested (supports album bulking & background music)
                 social_status = "idle"
                 social_details: dict[str, Any] = {}
                 if auto_post and target_account_ids:
+                    self._progress_update(
+                        progress_token, completed=progress_total,
+                        label=f"Memposting ke {len(target_account_ids)} akun media sosial...",
+                    )
                     social_status, social_details = await self._dispatch_social_post(
                         account_ids=target_account_ids,
                         media_urls=public_urls,
@@ -815,6 +922,7 @@ class AIImageStudioService:
                 finally:
                     conn.close()
 
+                self._progress_finish(progress_token, success=True)
                 return {
                     "success": True,
                     "id": run_id,
@@ -853,6 +961,7 @@ class AIImageStudioService:
                     conn.commit()
                 finally:
                     conn.close()
+                self._progress_finish(progress_token, success=False, error=str(e))
                 raise
 
     async def _dispatch_social_post(
@@ -944,7 +1053,14 @@ class AIImageStudioService:
                 logger.error(f"[AIImageStudio] Repliz post failed for account {acc_id}: {ex}")
                 failures.append({"accountId": acc_id, "error": str(ex)})
 
-        status = "scheduled" if successes else ("failed" if failures else "idle")
+        if successes and failures:
+            status = "partial"
+        elif successes:
+            status = "scheduled"
+        elif failures:
+            status = "failed"
+        else:
+            status = "idle"
         details = {
             "post_type": post_type,
             "media_count": len(medias),
@@ -968,39 +1084,68 @@ class AIImageStudioService:
                 logger.error(f"[AIImageStudio] Scheduler loop error: {e}")
             await asyncio.sleep(30)
 
+    def _claim_scheduled_slot(self, user_id: int, run_date: str, slot_name: str) -> bool:
+        """Atomically claim a (user, date, slot) tuple so only one process/worker
+        fires it, even when multiple uvicorn workers each run this scheduler loop."""
+        conn = get_dict_connection()
+        try:
+            conn.execute(
+                "INSERT INTO ai_image_scheduler_claims (user_id, run_date, slot_name) VALUES (?, ?, ?)",
+                (user_id, run_date, slot_name),
+            )
+            conn.commit()
+            return True
+        except sqlite3.IntegrityError:
+            return False
+        finally:
+            conn.close()
+
     async def _check_and_trigger_scheduled_slots(self) -> None:
-        """Evaluate whether any configured slot is due right now."""
-        settings_data = self.get_settings(user_id=1)
-        if not settings_data.get("enabled"):
-            return
+        """Evaluate whether any configured slot is due right now, for every user
+        with Hermes automation enabled (not just a single hardcoded account)."""
+        conn = get_dict_connection()
+        try:
+            cur = conn.cursor()
+            cur.execute("SELECT user_id FROM ai_image_settings WHERE enabled = 1")
+            enabled_user_ids = [row["user_id"] for row in cur.fetchall()]
+        finally:
+            conn.close()
 
         now_wib = dt.datetime.now(self.WIB)
         current_time_str = now_wib.strftime("%H:%M")
         today_date_str = now_wib.strftime("%Y-%m-%d")
 
-        daily_slots = settings_data.get("daily_slots") or []
-        for slot in daily_slots:
-            if not slot.get("enabled", True):
+        for user_id in enabled_user_ids:
+            settings_data = self.get_settings(user_id=user_id)
+            if not settings_data.get("enabled"):
                 continue
 
-            slot_time = slot.get("time", "")
-            slot_name = slot.get("name", "Slot")
-            slot_count = int(slot.get("count", settings_data.get("images_per_session", 2)))
-
-            if current_time_str == slot_time:
-                run_key = (1, today_date_str, slot_name)
-                if run_key in self._last_scheduled_runs:
+            daily_slots = settings_data.get("daily_slots") or []
+            for slot in daily_slots:
+                if not slot.get("enabled", True):
                     continue
 
-                logger.info(f"[AIImageStudio] Triggering Hermes slot: {slot_name} at {slot_time} WIB ({slot_count} items)")
-                self._last_scheduled_runs[run_key] = True
+                slot_time = slot.get("time", "")
+                slot_name = slot.get("name", "Slot")
+                slot_count = int(slot.get("count", settings_data.get("images_per_session", 2)))
+
+                if current_time_str != slot_time:
+                    continue
+
+                if not self._claim_scheduled_slot(user_id, today_date_str, slot_name):
+                    continue
+
+                logger.info(
+                    f"[AIImageStudio] Triggering Hermes slot for user {user_id}: "
+                    f"{slot_name} at {slot_time} WIB ({slot_count} items)"
+                )
 
                 topics = settings_data.get("topics") or ["Inspirasi & Mindset"]
                 topic = random.choice(topics)
 
                 asyncio.create_task(
                     self.execute_generation_session(
-                        user_id=1,
+                        user_id=user_id,
                         topic=topic,
                         session_name=f"Hermes Auto ({slot_name})",
                         image_count=slot_count,
@@ -1010,6 +1155,7 @@ class AIImageStudioService:
                         model_name=settings_data.get("model_name", "auto"),
                         background_source=settings_data.get("background_source", "ai_gemini"),
                         media_type=settings_data.get("media_type", "image"),
+                        footage_duration_sec=settings_data.get("footage_duration_sec", 8),
                         auto_post=settings_data.get("auto_post_enabled", False),
                         target_account_ids=settings_data.get("target_account_ids", []),
                         music_enabled=settings_data.get("music_enabled", False),

@@ -1863,6 +1863,15 @@ export interface InstantGeneratePayload {
   music_name?: string;
   music_artist?: string;
   music_thumbnail?: string;
+  progress_token?: string;
+}
+
+export interface ImageStudioProgress {
+  total: number;
+  completed: number;
+  status: "running" | "done" | "failed";
+  current_label: string;
+  error?: string | null;
 }
 
 export const imageStudioApi = {
@@ -1897,10 +1906,11 @@ export const imageStudioApi = {
     method: "POST",
     body: JSON.stringify(payload),
   }),
-  triggerRun: (payload?: { slot_name?: string; topic_override?: string; count_override?: number }) => request<{ success: boolean; message: string; data: any }>("/api/image-studio/run", {
+  triggerRun: (payload?: { slot_name?: string; topic_override?: string; count_override?: number; progress_token?: string }) => request<{ success: boolean; message: string; data: any }>("/api/image-studio/run", {
     method: "POST",
     body: JSON.stringify(payload || {}),
   }),
+  getProgress: (token: string) => request<{ success: boolean; data: ImageStudioProgress | null }>(`/api/image-studio/progress/${token}`),
   getHistory: () => request<{ success: boolean; data: ImageStudioRun[] }>("/api/image-studio/history"),
   deleteHistoryItem: (runId: number) => request<{ success: boolean; message: string }>(`/api/image-studio/history/${runId}`, {
     method: "DELETE",

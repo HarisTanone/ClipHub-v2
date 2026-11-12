@@ -47,6 +47,7 @@ import {
   CanvasAspectRatioMeta,
   AccentColorPreset,
   ImageStudioRun,
+  ImageStudioProgress,
   PlatformAccountInfo,
   TikTokMusicTrack,
   API_BASE,
@@ -87,6 +88,8 @@ export function GeneratedImagesPage() {
   const [generating, setGenerating] = useState<boolean>(false);
   const [triggeringRun, setTriggeringRun] = useState<boolean>(false);
   const [suggesting, setSuggesting] = useState<boolean>(false);
+  const [genProgress, setGenProgress] = useState<ImageStudioProgress | null>(null);
+  const progressPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   // Settings State
   const [settings, setSettings] = useState<ImageStudioSettings | null>(null);
@@ -350,10 +353,47 @@ export function GeneratedImagesPage() {
     }
   };
 
+  const genProgressToken = () => {
+    if (typeof crypto !== "undefined" && crypto.randomUUID) return crypto.randomUUID();
+    return `tok_${Date.now()}_${Math.random().toString(36).slice(2)}`;
+  };
+
+  const stopProgressPolling = () => {
+    if (progressPollRef.current) {
+      clearInterval(progressPollRef.current);
+      progressPollRef.current = null;
+    }
+  };
+
+  const startProgressPolling = (token: string) => {
+    stopProgressPolling();
+    progressPollRef.current = setInterval(async () => {
+      try {
+        const res = await imageStudioApi.getProgress(token);
+        if (res.success && res.data) {
+          setGenProgress(res.data);
+          if (res.data.status === "done" || res.data.status === "failed") {
+            stopProgressPolling();
+          }
+        }
+      } catch {
+        // Transient polling error — next tick will retry, no need to surface it.
+      }
+    }, 1000);
+  };
+
+  // Cleanup polling interval on unmount
+  useEffect(() => {
+    return () => stopProgressPolling();
+  }, []);
+
   const handleInstantGenerate = async () => {
     setGenerating(true);
     setLatestResult(null);
     setActiveSlideIndex(0);
+    const token = genProgressToken();
+    setGenProgress({ total: imageCount, completed: 0, status: "running", current_label: "Memulai..." });
+    startProgressPolling(token);
     try {
       const res = await imageStudioApi.generateInstant({
         topic,
@@ -378,6 +418,7 @@ export function GeneratedImagesPage() {
         music_name: musicModeInstant === "custom" && selectedTrackInstant ? selectedTrackInstant.name : undefined,
         music_artist: musicModeInstant === "custom" && selectedTrackInstant ? selectedTrackInstant.artist : undefined,
         music_thumbnail: musicModeInstant === "custom" && selectedTrackInstant ? selectedTrackInstant.thumbnail : undefined,
+        progress_token: token,
       });
       if (res.success && res.data) {
         setLatestResult(res.data);
@@ -389,15 +430,31 @@ export function GeneratedImagesPage() {
     } catch (err: any) {
       alert(`Gagal membuat visual post: ${err.message || err}`);
     } finally {
+      try {
+        const finalProg = await imageStudioApi.getProgress(token);
+        if (finalProg.success && finalProg.data) setGenProgress(finalProg.data);
+      } catch {
+        // Ignore — final panel state just stays at its last known value.
+      }
+      stopProgressPolling();
       setGenerating(false);
     }
   };
 
   const handleTriggerManualHermes = async () => {
     setTriggeringRun(true);
+    const token = genProgressToken();
+    setGenProgress({
+      total: settings?.images_per_session || 2,
+      completed: 0,
+      status: "running",
+      current_label: "Memulai sesi Hermes...",
+    });
+    startProgressPolling(token);
     try {
       const res = await imageStudioApi.triggerRun({
         slot_name: "Manual Hermes Run",
+        progress_token: token,
       });
       if (res.success && res.data) {
         setLatestResult(res.data);
@@ -408,6 +465,13 @@ export function GeneratedImagesPage() {
     } catch (err: any) {
       alert(`Gagal menjalankan sesi Hermes: ${err.message || err}`);
     } finally {
+      try {
+        const finalProg = await imageStudioApi.getProgress(token);
+        if (finalProg.success && finalProg.data) setGenProgress(finalProg.data);
+      } catch {
+        // Ignore — final panel state just stays at its last known value.
+      }
+      stopProgressPolling();
       setTriggeringRun(false);
     }
   };
@@ -450,6 +514,10 @@ export function GeneratedImagesPage() {
     setSelectedRunForSocial(run);
     setSocialModalOpen(true);
     setPublishSuccessMessage("");
+    // Force explicit re-selection per run instead of carrying over whatever
+    // was last picked (Instant Studio's selector, or a previous run's modal) —
+    // publishing this specific run to stale/unintended accounts is a real risk.
+    setSelectedAccountIds([]);
     setModalMusicEnabled(Boolean(run.social_details?.music_enabled || false));
     setModalMusicMode("auto");
     setModalSelectedTrack(null);
@@ -475,7 +543,14 @@ export function GeneratedImagesPage() {
         music_thumbnail: modalMusicMode === "custom" && modalSelectedTrack ? modalSelectedTrack.thumbnail : undefined,
       });
       if (res.success) {
-        setPublishSuccessMessage("Post berhasil dijadwalkan ke akun media sosial terpilih.");
+        if (res.status === "partial") {
+          const failedCount = res.details?.failures?.length || 0;
+          setPublishSuccessMessage(
+            `Sebagian berhasil: ${failedCount} akun gagal dijadwalkan. Cek detail akun di riwayat.`
+          );
+        } else {
+          setPublishSuccessMessage("Post berhasil dijadwalkan ke akun media sosial terpilih.");
+        }
         const hRes = await imageStudioApi.getHistory();
         if (hRes.success) setHistory(hRes.data);
       } else {
@@ -634,6 +709,54 @@ export function GeneratedImagesPage() {
           </button>
         </div>
       </div>
+
+      {/* ─── Live Generation Progress Panel ─────────────────────────────── */}
+      {genProgress && (
+        <div
+          className={cn(
+            "rounded-2xl border p-4 space-y-2.5",
+            genProgress.status === "failed"
+              ? "border-rose-500/40 bg-rose-500/5"
+              : genProgress.status === "done"
+              ? "border-emerald-500/30 bg-emerald-500/5"
+              : "border-purple-500/30 bg-purple-500/5"
+          )}
+        >
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2 text-xs font-semibold text-zinc-200">
+              {genProgress.status === "failed" ? (
+                <AlertCircle className="h-4 w-4 text-rose-400" />
+              ) : genProgress.status === "done" ? (
+                <CheckCircle2 className="h-4 w-4 text-emerald-400" />
+              ) : (
+                <Sparkles className="h-4 w-4 text-purple-400 animate-pulse" />
+              )}
+              <span>{genProgress.current_label}</span>
+            </div>
+            <span className="text-[11px] text-zinc-400 font-mono">
+              {genProgress.completed}/{genProgress.total}
+            </span>
+          </div>
+          <div className="h-1.5 w-full rounded-full bg-zinc-800 overflow-hidden">
+            <div
+              className={cn(
+                "h-full rounded-full transition-all duration-500",
+                genProgress.status === "failed"
+                  ? "bg-rose-500"
+                  : genProgress.status === "done"
+                  ? "bg-emerald-500"
+                  : "bg-purple-500"
+              )}
+              style={{
+                width: `${Math.min(100, Math.round((genProgress.completed / Math.max(1, genProgress.total)) * 100))}%`,
+              }}
+            />
+          </div>
+          {genProgress.status === "failed" && genProgress.error && (
+            <p className="text-[11px] text-rose-300">{genProgress.error}</p>
+          )}
+        </div>
+      )}
 
       {/* ─── Navigation Tabs ─────────────────────────────────────────────── */}
       <div className="flex items-center gap-2 border-b border-zinc-800/80 overflow-x-auto scrollbar-none">
@@ -1645,6 +1768,179 @@ export function GeneratedImagesPage() {
               </div>
             </div>
 
+            {/* Visual Output Preset for Automation Runs */}
+            <div className="space-y-3 pt-2">
+              <div>
+                <h4 className="text-xs font-semibold text-zinc-200 uppercase tracking-wider">
+                  Preset Visual Output Harian
+                </h4>
+                <p className="text-[11px] text-zinc-500">
+                  Gaya, format, dan sumber media yang dipakai setiap sesi automasi berjalan tanpa interaksi pengguna
+                </p>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                  <label className="text-[11px] font-medium text-zinc-400 uppercase tracking-wider block mb-1.5">
+                    Tipe Output
+                  </label>
+                  <div className="grid grid-cols-2 gap-1.5">
+                    <button
+                      type="button"
+                      onClick={() => settings && setSettings({ ...settings, media_type: "image" })}
+                      className={cn(
+                        "flex items-center justify-center gap-1.5 rounded-xl border py-2 text-xs font-medium transition-all",
+                        settings?.media_type === "image"
+                          ? "border-emerald-500 bg-emerald-500/10 text-emerald-300"
+                          : "border-zinc-800 bg-zinc-900 text-zinc-400 hover:text-zinc-200"
+                      )}
+                    >
+                      <ImageIcon className="h-3.5 w-3.5" />
+                      <span>Gambar</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => settings && setSettings({ ...settings, media_type: "video_footage" })}
+                      className={cn(
+                        "flex items-center justify-center gap-1.5 rounded-xl border py-2 text-xs font-medium transition-all",
+                        settings?.media_type === "video_footage"
+                          ? "border-emerald-500 bg-emerald-500/10 text-emerald-300"
+                          : "border-zinc-800 bg-zinc-900 text-zinc-400 hover:text-zinc-200"
+                      )}
+                    >
+                      <Film className="h-3.5 w-3.5" />
+                      <span>Video</span>
+                    </button>
+                  </div>
+                </div>
+
+                <div>
+                  <label className="text-[11px] font-medium text-zinc-400 uppercase tracking-wider block mb-1.5">
+                    Aspek Rasio
+                  </label>
+                  <select
+                    value={settings?.aspect_ratio || "9:16"}
+                    onChange={(e) => settings && setSettings({ ...settings, aspect_ratio: e.target.value })}
+                    className="w-full rounded-xl bg-zinc-900 border border-zinc-800 px-3 py-2 text-xs text-zinc-200 focus:outline-none focus:border-emerald-500"
+                  >
+                    {aspectRatios.map((ar) => (
+                      <option key={ar.id} value={ar.id}>
+                        {ar.name} ({ar.width}x{ar.height})
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                  <label className="text-[11px] font-medium text-zinc-400 uppercase tracking-wider block mb-1.5">
+                    Template Tipografi
+                  </label>
+                  <select
+                    value={settings?.template_preset || "auto"}
+                    onChange={(e) => settings && setSettings({ ...settings, template_preset: e.target.value })}
+                    className="w-full rounded-xl bg-zinc-900 border border-zinc-800 px-3 py-2 text-xs text-zinc-200 focus:outline-none focus:border-emerald-500"
+                  >
+                    <option value="auto">Auto (Dipilih AI sesuai topik)</option>
+                    {templates.map((tpl) => (
+                      <option key={tpl.id} value={tpl.id}>
+                        {tpl.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div>
+                  <label className="text-[11px] font-medium text-zinc-400 uppercase tracking-wider block mb-1.5">
+                    Font Utama
+                  </label>
+                  <select
+                    value={settings?.font_family || "auto"}
+                    onChange={(e) => settings && setSettings({ ...settings, font_family: e.target.value })}
+                    className="w-full rounded-xl bg-zinc-900 border border-zinc-800 px-3 py-2 text-xs text-zinc-200 focus:outline-none focus:border-emerald-500"
+                  >
+                    <option value="auto">Auto (Sesuai Karakter Template)</option>
+                    {fonts.map((f) => (
+                      <option key={f} value={f}>
+                        {f}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+
+              <div>
+                <label className="text-[11px] font-medium text-zinc-400 uppercase tracking-wider block mb-1.5">
+                  Sumber Latar Belakang
+                </label>
+                <div className="grid grid-cols-3 gap-2">
+                  {[
+                    { id: "ai_gemini", label: "AI Gemini", desc: "Generated Image API" },
+                    { id: "pexels", label: "Pexels Stock", desc: "Stock Foto/Video" },
+                    { id: "pixabay", label: "Pixabay Stock", desc: "Royalty Free" },
+                  ].map((src) => (
+                    <button
+                      key={src.id}
+                      type="button"
+                      onClick={() => settings && setSettings({ ...settings, background_source: src.id })}
+                      className={cn(
+                        "flex flex-col text-left p-2.5 rounded-xl border text-xs transition-all",
+                        settings?.background_source === src.id
+                          ? "border-emerald-500 bg-emerald-500/10 text-white ring-1 ring-emerald-500/30"
+                          : "border-zinc-800 bg-zinc-900/60 text-zinc-400 hover:border-zinc-700 hover:text-zinc-200"
+                      )}
+                    >
+                      <span className="font-semibold">{src.label}</span>
+                      <span className="text-[10px] text-zinc-500">{src.desc}</span>
+                    </button>
+                  ))}
+                </div>
+                <p className="text-[10px] text-zinc-500 mt-1.5">
+                  Upload manual tidak tersedia untuk sesi automasi karena berjalan tanpa interaksi pengguna.
+                </p>
+              </div>
+
+              {settings?.media_type === "video_footage" && (
+                <div>
+                  <label className="text-[11px] font-medium text-zinc-400 uppercase tracking-wider block mb-1.5">
+                    Durasi Footage (detik)
+                  </label>
+                  <input
+                    type="number"
+                    min={3}
+                    max={30}
+                    value={settings?.footage_duration_sec || 8}
+                    onChange={(e) =>
+                      settings && setSettings({ ...settings, footage_duration_sec: parseInt(e.target.value) || 8 })
+                    }
+                    className="w-32 rounded-xl bg-zinc-900 border border-zinc-800 px-3.5 py-2 text-xs text-zinc-200 focus:outline-none focus:border-emerald-500"
+                  />
+                </div>
+              )}
+
+              <div className="flex items-center justify-between pt-1">
+                <div className="flex items-center gap-2">
+                  <Music className="h-4 w-4 text-purple-400" />
+                  <div>
+                    <span className="text-xs font-semibold text-zinc-200 block">Musik Latar Otomatis</span>
+                    <span className="text-[10px] text-zinc-500">Platform akan memilih sound trending yang relevan</span>
+                  </div>
+                </div>
+                <label className="relative inline-flex items-center cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={settings?.music_enabled || false}
+                    onChange={(e) =>
+                      settings && setSettings({ ...settings, music_enabled: e.target.checked, music_track: "auto" })
+                    }
+                    className="sr-only peer"
+                  />
+                  <div className="w-9 h-5 bg-zinc-800 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-zinc-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-purple-600"></div>
+                </label>
+              </div>
+            </div>
+
             {/* Daily Slots Manager */}
             <div className="space-y-3">
               <div className="flex items-center justify-between">
@@ -1683,8 +1979,8 @@ export function GeneratedImagesPage() {
                         type="text"
                         value={slot.name}
                         onChange={(e) => {
-                          const updated = [...(settings.daily_slots || [])];
-                          updated[idx].name = e.target.value;
+                          const name = e.target.value;
+                          const updated = settings.daily_slots.map((s, i) => (i === idx ? { ...s, name } : s));
                           setSettings({ ...settings, daily_slots: updated });
                         }}
                         className="bg-transparent font-semibold text-xs text-zinc-200 focus:outline-none border-b border-transparent focus:border-zinc-700"
@@ -1707,8 +2003,8 @@ export function GeneratedImagesPage() {
                         type="time"
                         value={slot.time}
                         onChange={(e) => {
-                          const updated = [...settings.daily_slots];
-                          updated[idx].time = e.target.value;
+                          const time = e.target.value;
+                          const updated = settings.daily_slots.map((s, i) => (i === idx ? { ...s, time } : s));
                           setSettings({ ...settings, daily_slots: updated });
                         }}
                         className="w-full rounded-lg bg-zinc-950 border border-zinc-800 px-2.5 py-1 text-xs text-zinc-200 focus:outline-none focus:border-cyan-500"
@@ -1723,8 +2019,8 @@ export function GeneratedImagesPage() {
                         max={10}
                         value={slot.count}
                         onChange={(e) => {
-                          const updated = [...settings.daily_slots];
-                          updated[idx].count = parseInt(e.target.value) || 1;
+                          const count = parseInt(e.target.value) || 1;
+                          const updated = settings.daily_slots.map((s, i) => (i === idx ? { ...s, count } : s));
                           setSettings({ ...settings, daily_slots: updated });
                         }}
                         className="w-16 rounded-lg bg-zinc-950 border border-zinc-800 px-2 py-0.5 text-xs text-right text-zinc-200 focus:outline-none"
@@ -2055,6 +2351,8 @@ export function GeneratedImagesPage() {
                           "px-2 py-0.5 rounded-full capitalize",
                           run.social_post_status === "scheduled" || run.social_post_status === "published"
                             ? "bg-purple-500/15 text-purple-400"
+                            : run.social_post_status === "partial"
+                            ? "bg-amber-500/15 text-amber-400"
                             : "bg-zinc-800 text-zinc-400"
                         )}
                       >
