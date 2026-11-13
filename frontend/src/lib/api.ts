@@ -1778,9 +1778,46 @@ export interface ImageStudioSettings {
   footage_duration_sec: number;
   today_images_created: number;
   last_run_date?: string | null;
+  content_mode: string;
+  publish_mode: string;
+  always_update_interval_min: number;
+  last_news_check_at?: string | null;
   gateway_endpoint?: string;
   gateway_model?: string;
   gateway_has_key?: boolean;
+}
+
+export interface NewsArticlePreview {
+  topic: string;
+  title: string;
+  summary: string;
+  source: string;
+  url: string;
+  recency: string;
+}
+
+export interface NewsQueueItem {
+  id: number;
+  user_id: number;
+  topic: string;
+  article_title: string;
+  article_url: string;
+  article_summary: string;
+  source_name: string;
+  status: "pending" | "processing" | "done" | "failed" | "skipped";
+  run_id?: number | null;
+  error_message?: string | null;
+  created_at: string;
+  processed_at?: string | null;
+}
+
+export interface DesignAnalysisResult {
+  primary_font: string;
+  secondary_font: string;
+  layout_type: string;
+  recommended_accent: string;
+  vibe: string;
+  suggested_name: string;
 }
 
 export interface CanvasAspectRatioMeta {
@@ -1813,6 +1850,7 @@ export interface TypographyTemplateMeta {
   is_builtin?: number;
   is_active?: number;
   sort_order?: number;
+  updated_at?: string;
 }
 
 export interface ImageStudioRun {
@@ -1836,6 +1874,9 @@ export interface ImageStudioRun {
   social_post_status: string;
   social_details: any;
   trigger_source: string;
+  content_mode?: string;
+  source_url?: string | null;
+  source_name?: string | null;
   error_message?: string | null;
   created_at: string;
 }
@@ -1864,6 +1905,8 @@ export interface InstantGeneratePayload {
   music_artist?: string;
   music_thumbnail?: string;
   progress_token?: string;
+  content_mode?: string;
+  custom_background_path?: string;
 }
 
 export interface ImageStudioProgress {
@@ -1929,17 +1972,20 @@ export const imageStudioApi = {
     method: "POST",
     body: JSON.stringify(payload),
   }),
-  uploadMedia: async (formData: FormData) => {
-    const res = await fetch(`${API_BASE}/api/image-studio/upload-media`, {
+  uploadMedia: (formData: FormData) => requestForm<{ success: boolean; filename: string; url: string; local_path: string }>("/api/image-studio/upload-media", formData),
+  discoverNews: (topics?: string[]) => request<{ success: boolean; data: NewsArticlePreview[] }>("/api/image-studio/discover-news", {
+    method: "POST",
+    body: JSON.stringify({ topics }),
+  }),
+  getNewsQueue: () => request<{ success: boolean; data: NewsQueueItem[] }>("/api/image-studio/news-queue"),
+  getTemplatePreviewUrl: (templateId: string, updatedAt?: string) =>
+    `${API_BASE}/api/image-studio/templates/${encodeURIComponent(templateId)}/preview.png${updatedAt ? `?v=${encodeURIComponent(updatedAt)}` : ""}`,
+  analyzeDesign: (formData: FormData) => requestForm<{ success: boolean; data: DesignAnalysisResult }>("/api/image-studio/analyze-design", formData),
+  cloneDesign: (payload: { name: string; primary_font: string; secondary_font: string; recommended_accent: string; layout_type: string; vibe?: string }) =>
+    request<{ success: boolean; message: string; data: TypographyTemplateMeta }>("/api/image-studio/clone-design", {
       method: "POST",
-      body: formData,
-    });
-    if (!res.ok) {
-      const err = await res.text();
-      throw new Error(err || "Upload failed");
-    }
-    return res.json();
-  },
+      body: JSON.stringify(payload),
+    }),
 };
 
 

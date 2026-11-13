@@ -41,10 +41,12 @@ from src.infrastructure.ai_image_typography import (
     typography_engine,
 )
 from src.infrastructure.image_typography_store import (
+    get_all_typography_fonts,
     get_all_typography_templates,
     get_typography_template,
 )
 from src.infrastructure.db_connection import get_dict_connection
+from src.infrastructure.hermes_trending_service import hermes_trending_service
 from src.infrastructure.minio_service import MinioService
 from src.infrastructure.model_settings_store import get_model_setting
 from src.infrastructure.nine_router_client import NineRouterClient
@@ -54,6 +56,7 @@ logger = logging.getLogger(__name__)
 
 OUTPUT_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "tmp", "image_studio"))
 ASSETS_MUSIC_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "assets", "music"))
+PREVIEW_DIR = os.path.join(OUTPUT_DIR, "previews")
 
 
 class AIImageStudioService:
@@ -64,6 +67,7 @@ class AIImageStudioService:
     def __init__(self):
         os.makedirs(OUTPUT_DIR, exist_ok=True)
         os.makedirs(ASSETS_MUSIC_DIR, exist_ok=True)
+        os.makedirs(PREVIEW_DIR, exist_ok=True)
         self._minio = MinioService()
         self._run_lock = asyncio.Lock()
         self._progress_store: dict[str, dict[str, Any]] = {}
@@ -190,8 +194,32 @@ class AIImageStudioService:
                     footage_duration_sec INTEGER NOT NULL DEFAULT 8,
                     last_run_date TEXT DEFAULT NULL,
                     today_images_created INTEGER NOT NULL DEFAULT 0,
+                    content_mode TEXT NOT NULL DEFAULT 'quote',
+                    publish_mode TEXT NOT NULL DEFAULT 'scheduled',
+                    always_update_interval_min INTEGER NOT NULL DEFAULT 20,
+                    last_news_check_at DATETIME DEFAULT NULL,
                     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
                     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+
+            # Queue of discovered news articles per user — dedup via UNIQUE(user_id, article_url)
+            # and used by Always Update mode to process one fresh article per tick.
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS ai_image_news_queue (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    user_id INTEGER NOT NULL,
+                    topic TEXT NOT NULL,
+                    article_title TEXT NOT NULL,
+                    article_url TEXT NOT NULL,
+                    article_summary TEXT NOT NULL DEFAULT '',
+                    source_name TEXT NOT NULL DEFAULT '',
+                    status TEXT NOT NULL DEFAULT 'pending',
+                    run_id INTEGER DEFAULT NULL,
+                    error_message TEXT DEFAULT NULL,
+                    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                    processed_at DATETIME DEFAULT NULL,
+                    UNIQUE(user_id, article_url)
                 )
             """)
 
@@ -219,6 +247,9 @@ class AIImageStudioService:
                     social_post_status TEXT NOT NULL DEFAULT 'idle',
                     social_details TEXT NOT NULL DEFAULT '{}',
                     trigger_source TEXT NOT NULL DEFAULT 'manual',
+                    content_mode TEXT NOT NULL DEFAULT 'quote',
+                    source_url TEXT DEFAULT NULL,
+                    source_name TEXT DEFAULT NULL,
                     error_message TEXT DEFAULT NULL,
                     created_at DATETIME DEFAULT CURRENT_TIMESTAMP
                 )
@@ -242,11 +273,25 @@ class AIImageStudioService:
             cols_s = {row["name"] for row in cur.fetchall()}
             if "model_name" not in cols_s:
                 conn.execute("ALTER TABLE ai_image_settings ADD COLUMN model_name TEXT NOT NULL DEFAULT 'auto'")
+            if "content_mode" not in cols_s:
+                conn.execute("ALTER TABLE ai_image_settings ADD COLUMN content_mode TEXT NOT NULL DEFAULT 'quote'")
+            if "publish_mode" not in cols_s:
+                conn.execute("ALTER TABLE ai_image_settings ADD COLUMN publish_mode TEXT NOT NULL DEFAULT 'scheduled'")
+            if "always_update_interval_min" not in cols_s:
+                conn.execute("ALTER TABLE ai_image_settings ADD COLUMN always_update_interval_min INTEGER NOT NULL DEFAULT 20")
+            if "last_news_check_at" not in cols_s:
+                conn.execute("ALTER TABLE ai_image_settings ADD COLUMN last_news_check_at DATETIME DEFAULT NULL")
 
             cur.execute("PRAGMA table_info(ai_image_runs)")
             cols_r = {row["name"] for row in cur.fetchall()}
             if "model_name" not in cols_r:
                 conn.execute("ALTER TABLE ai_image_runs ADD COLUMN model_name TEXT DEFAULT NULL")
+            if "content_mode" not in cols_r:
+                conn.execute("ALTER TABLE ai_image_runs ADD COLUMN content_mode TEXT NOT NULL DEFAULT 'quote'")
+            if "source_url" not in cols_r:
+                conn.execute("ALTER TABLE ai_image_runs ADD COLUMN source_url TEXT DEFAULT NULL")
+            if "source_name" not in cols_r:
+                conn.execute("ALTER TABLE ai_image_runs ADD COLUMN source_name TEXT DEFAULT NULL")
 
             # Seed default record for user 1 if empty
             cur.execute("SELECT id FROM ai_image_settings WHERE user_id = 1")
@@ -313,7 +358,8 @@ class AIImageStudioService:
                 "aspect_ratio", "template_preset", "font_family", "model_name",
                 "background_source", "media_type", "auto_post_enabled",
                 "target_account_ids", "music_enabled", "music_track",
-                "footage_duration_sec",
+                "footage_duration_sec", "content_mode", "publish_mode",
+                "always_update_interval_min",
             ]
             for k in allowed_keys:
                 if k in data:
@@ -364,6 +410,10 @@ class AIImageStudioService:
             "footage_duration_sec": 8,
             "today_images_created": 0,
             "last_run_date": None,
+            "content_mode": "quote",
+            "publish_mode": "scheduled",
+            "always_update_interval_min": 20,
+            "last_news_check_at": None,
             "gateway_endpoint": self.get_image_api_endpoint(),
             "gateway_model": self.get_image_model(),
             "gateway_has_key": bool(self.get_image_api_key()),
@@ -548,6 +598,74 @@ class AIImageStudioService:
 
         return None
 
+    # ─── Multi-Topic News Discovery (Hermes News Mode) ────────────────────────
+
+    @staticmethod
+    def _normalize_title(title: str) -> str:
+        """Normalize a headline for cross-topic duplicate detection."""
+        return re.sub(r"[^a-z0-9 ]", "", (title or "").lower()).strip()
+
+    async def discover_news_for_topics(
+        self,
+        topics: list[str],
+        region: str = "ID",
+        per_topic_limit: int = 3,
+        exclude_urls: Optional[set[str]] = None,
+        exclude_titles: Optional[set[str]] = None,
+    ) -> list[dict[str, Any]]:
+        """Search real, current news/content for every configured topic.
+
+        Reuses hermes_trending_service.fetch_google_trends(keyword=...), which is a
+        live Google News RSS search per keyword — no hardcoded topic/lexicon map.
+        Aggregates across all topics, then dedupes by URL and by normalized title.
+        """
+        clean_topics = [t.strip() for t in (topics or []) if t and t.strip()]
+        if not clean_topics:
+            return []
+
+        exclude_urls = exclude_urls or set()
+        exclude_titles = exclude_titles or set()
+
+        results = await asyncio.gather(
+            *[
+                hermes_trending_service.fetch_google_trends(
+                    region=region,
+                    keyword=tpc,
+                    limit=per_topic_limit,
+                    timeframe="24h",
+                    sort_by="recency",
+                )
+                for tpc in clean_topics
+            ],
+            return_exceptions=True,
+        )
+
+        seen_titles: set[str] = set(exclude_titles)
+        articles: list[dict[str, Any]] = []
+        for tpc, items in zip(clean_topics, results):
+            if not isinstance(items, list):
+                continue
+            for item in items:
+                title = (item.get("title") or "").strip()
+                if not title:
+                    continue
+                norm_title = self._normalize_title(title)
+                url = (item.get("url") or item.get("link") or "").strip()
+                if url and url in exclude_urls:
+                    continue
+                if norm_title in seen_titles:
+                    continue
+                seen_titles.add(norm_title)
+                articles.append({
+                    "topic": tpc,
+                    "title": title,
+                    "summary": item.get("summary") or item.get("news_title") or "",
+                    "source": item.get("source") or "Google News",
+                    "url": url,
+                    "recency": item.get("recency") or "Baru saja",
+                })
+        return articles
+
     def suggest_quote_content(self, topic: str) -> dict[str, str]:
         """Use 9router AI to brainstorm and generate high-impact viral quote, hook, and prompt from any topic briefing."""
         safe_topic = (topic or "Inspirasi & Mindset").strip()
@@ -620,6 +738,94 @@ class AIImageStudioService:
 
         return template_id, font_name
 
+    # ─── Design Reference / Clone Design (AI Vision Style Extraction) ─────────
+
+    def get_design_analysis_model(self) -> str:
+        """Dynamically resolve a vision-capable model for design analysis.
+
+        Reads DESIGN_ANALYSIS_MODEL from system settings first, falling back to
+        whatever image-gen model is configured. Never hardcoded.
+        """
+        return (
+            get_system_setting("DESIGN_ANALYSIS_MODEL")
+            or get_model_setting("DESIGN_ANALYSIS_MODEL")
+            or self.get_image_model(None)
+        ).strip()
+
+    async def analyze_design_reference(self, image_bytes: bytes) -> dict[str, Any]:
+        """Use a vision-capable LLM to extract the style (not the content) of a
+        reference design image: typography feel, dominant accent color, and the
+        closest matching layout engine + font already available in this app.
+
+        The AI must choose from the real, currently active template/font sets —
+        it never invents a layout algorithm or font that does not exist here.
+        """
+        client = NineRouterClient(timeout=60)
+        if not client.is_configured:
+            raise RuntimeError("9router belum dikonfigurasi — tidak dapat menganalisis desain referensi")
+
+        db_templates = get_all_typography_templates(include_inactive=False)
+        layout_options = sorted({t.get("layout_type") or t["id"] for t in db_templates}) or ["minimal_quote"]
+        font_options = [f["font_name"] for f in get_all_typography_fonts(include_inactive=False)] or ["Playfair Display", "Inter"]
+
+        b64_str = base64.b64encode(image_bytes).decode("ascii")
+
+        system_prompt = (
+            "You are a senior graphic design analyst. An image has been attached to this message — "
+            "it is a reference design (a poster, quote card, or social media graphic). Analyze its STYLE — "
+            "typography feel, text hierarchy, color palette, and layout structure — NOT its literal content/background photo. "
+            "You must map your analysis to options that already exist in this system:\n"
+            f"- 'primary_font': choose the single closest match from this exact list: {json.dumps(font_options)}\n"
+            f"- 'secondary_font': choose the single closest match from this exact list: {json.dumps(font_options)}\n"
+            f"- 'layout_type': choose the single closest match from this exact list: {json.dumps(layout_options)}\n"
+            "- 'recommended_accent': the dominant accent color as a hex string, e.g. '#EAB308'\n"
+            "- 'vibe': a short 1-sentence description of the design's mood/style in Indonesian\n"
+            "- 'suggested_name': a short, catchy 2-4 word preset name in Indonesian\n"
+            "Respond strictly with a single JSON object with exactly these 6 keys. No markdown, no emojis, pure JSON."
+        )
+
+        messages = [
+            {"role": "system", "content": system_prompt},
+            {
+                "role": "user",
+                "content": [
+                    {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{b64_str}"}},
+                    {"type": "text", "text": "The attached image is the design reference. Analyze its style now and answer with the JSON object described in your instructions."},
+                ],
+            },
+        ]
+
+        # The 9router gateway picks its own upstream model per request, so a vision
+        # call occasionally lands on a non-vision backend and comes back as a plain
+        # refusal instead of JSON. One retry absorbs that transient routing flake.
+        json_match = None
+        raw = ""
+        for attempt in range(2):
+            raw = client.chat(messages=messages, model=self.get_design_analysis_model(), max_tokens=500)
+            json_match = re.search(r"\{.*\}", raw, re.DOTALL)
+            if json_match:
+                break
+        if not json_match:
+            raise RuntimeError(f"AI tidak mengembalikan hasil analisis yang valid, coba lagi: {raw[:200]}")
+        parsed = json.loads(json_match.group(0))
+
+        primary_font = parsed.get("primary_font") if parsed.get("primary_font") in font_options else font_options[0]
+        secondary_font = parsed.get("secondary_font") if parsed.get("secondary_font") in font_options else font_options[0]
+        layout_type = parsed.get("layout_type") if parsed.get("layout_type") in layout_options else layout_options[0]
+
+        accent = str(parsed.get("recommended_accent") or "#EAB308").strip()
+        if not re.match(r"^#[0-9A-Fa-f]{6}$", accent):
+            accent = "#EAB308"
+
+        return {
+            "primary_font": primary_font,
+            "secondary_font": secondary_font,
+            "layout_type": layout_type,
+            "recommended_accent": accent,
+            "vibe": str(parsed.get("vibe") or "Hasil analisis desain referensi"),
+            "suggested_name": str(parsed.get("suggested_name") or "Preset Clone Design"),
+        }
+
     async def render_image_item(
         self,
         topic: str,
@@ -646,6 +852,12 @@ class AIImageStudioService:
             base_img = await self.search_stock_photo(topic or prompt, provider=background_source)
             if not base_img:
                 base_img = await self.generate_gemini_image(prompt, content.aspect_ratio, model_name=model_name)
+        elif background_source in ("user_upload", "design_clone"):
+            # The actual uploaded file is normally passed in via custom_base_image.
+            # If it is missing (e.g. file got deleted between upload and render),
+            # fail safe to AI generation instead of silently rendering a blank canvas.
+            logger.warning(f"[AIImageStudio] background_source={background_source} without a loaded image — falling back to AI generation")
+            base_img = await self.generate_gemini_image(prompt, content.aspect_ratio, model_name=model_name)
 
         final_img = typography_engine.render_overlay(base_img, content)
 
@@ -763,6 +975,9 @@ class AIImageStudioService:
         music_thumbnail: Optional[str] = None,
         trigger_source: str = "manual",
         progress_token: Optional[str] = None,
+        content_mode: str = "quote",
+        news_article: Optional[dict[str, Any]] = None,
+        custom_background_path: Optional[str] = None,
     ) -> dict[str, Any]:
         """Execute a full generation batch, record run, and optionally auto-post."""
         async with self._run_lock:
@@ -775,13 +990,44 @@ class AIImageStudioService:
                 topics = s.get("topics") or ["Inspirasi & Mindset"]
                 topic = random.choice(topics)
 
+            # 1b. Load custom uploaded background once (user_upload / design_clone source)
+            custom_base_image: Optional[Image.Image] = None
+            if background_source in ("user_upload", "design_clone") and custom_background_path and os.path.exists(custom_background_path):
+                try:
+                    custom_base_image = Image.open(custom_background_path)
+                except Exception as e:
+                    logger.warning(f"[AIImageStudio] Failed loading custom background '{custom_background_path}': {e}")
+
             # 2. Resolve template, font, and model
             tpl_id, font_name = self._resolve_template_and_font(template_preset, font_family, topic)
             active_model = self.get_image_model(model_name)
 
+            # 2b. News Discovery mode: swap the topic briefing for a real, current article
+            # found via discover_news_for_topics (Google News RSS per keyword — not hardcoded).
+            source_url: Optional[str] = None
+            source_name: Optional[str] = None
+            use_news = content_mode == "news" or (content_mode == "both" and random.choice([True, False]))
+            if use_news and not quote_headline:
+                article = news_article
+                if not article:
+                    found = await self.discover_news_for_topics([topic], per_topic_limit=5)
+                    article = found[0] if found else None
+                if article:
+                    topic = article.get("topic") or topic
+                    source_url = article.get("url") or None
+                    source_name = article.get("source") or None
+                    news_briefing = f"{article['title']} — {article.get('summary', '')}".strip(" —")
+                else:
+                    # No fresh article found for this topic right now — degrade to quote mode
+                    # for this run instead of failing the whole session.
+                    use_news = False
+                    news_briefing = topic
+            else:
+                news_briefing = topic
+
             # 3. AI Copilot: if headline is not supplied, auto-suggest viral quote content
             if not quote_headline:
-                suggested = self.suggest_quote_content(topic)
+                suggested = self.suggest_quote_content(news_briefing)
                 hook = quote_hook or suggested["hook"]
                 headline = suggested["headline"]
                 body_text = quote_body or suggested["body"]
@@ -862,6 +1108,7 @@ class AIImageStudioService:
                             prompt=f"{prompt}, variation {i + 1}",
                             content=content,
                             background_source=background_source,
+                            custom_base_image=custom_base_image,
                             model_name=active_model,
                         )
                         local_paths.append(l_path)
@@ -870,6 +1117,9 @@ class AIImageStudioService:
                             progress_token, completed=i + 1,
                             label=f"Gambar {i + 1}/{image_count} selesai",
                         )
+
+                resolved_content_mode = "news" if use_news else "quote"
+                attribution = f"\n\nSumber: {source_name}" if (use_news and source_name) else ""
 
                 # 4. Social Auto Post if requested (supports album bulking & background music)
                 social_status = "idle"
@@ -883,7 +1133,7 @@ class AIImageStudioService:
                         account_ids=target_account_ids,
                         media_urls=public_urls,
                         title=f"{topic} — {headline[:60]}",
-                        caption=f"{headline}\n\n{body_text}\n\n— {author}\n\n#{topic.replace(' ', '')} #Inspirasi #Mindset #HermesAI",
+                        caption=f"{headline}\n\n{body_text}\n\n— {author}{attribution}\n\n#{topic.replace(' ', '')} #Inspirasi #Mindset #HermesAI",
                         media_type="video" if media_type == "video_footage" else "image",
                         music_enabled=music_enabled,
                         music_id=music_id,
@@ -901,14 +1151,16 @@ class AIImageStudioService:
                             quote_hook, quote_headline, quote_body, quote_author, quote_handle,
                             media_type, template_preset, font_name, model_name, aspect_ratio,
                             image_urls, video_url, local_paths,
-                            social_post_status, social_details, trigger_source
-                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                            social_post_status, social_details, trigger_source,
+                            content_mode, source_url, source_name
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """, (
                         user_id, today_str, session_name, topic, prompt,
                         hook, headline, body_text, author, quote_handle,
                         media_type, tpl_id, font_name, active_model, aspect_ratio,
                         json.dumps(public_urls), video_url, json.dumps(local_paths),
                         social_status, json.dumps(social_details), trigger_source,
+                        resolved_content_mode, source_url, source_name,
                     ))
                     run_id = cursor.lastrowid
 
@@ -941,6 +1193,9 @@ class AIImageStudioService:
                     "count": len(public_urls),
                     "social_post_status": social_status,
                     "social_details": social_details,
+                    "content_mode": resolved_content_mode,
+                    "source_url": source_url,
+                    "source_name": source_name,
                 }
 
             except Exception as e:
@@ -1120,6 +1375,13 @@ class AIImageStudioService:
             if not settings_data.get("enabled"):
                 continue
 
+            if settings_data.get("publish_mode") == "always_update":
+                try:
+                    await self._tick_always_update(user_id, settings_data)
+                except Exception as e:
+                    logger.error(f"[AIImageStudio] Always Update tick failed for user {user_id}: {e}")
+                continue
+
             daily_slots = settings_data.get("daily_slots") or []
             for slot in daily_slots:
                 if not slot.get("enabled", True):
@@ -1161,8 +1423,178 @@ class AIImageStudioService:
                         music_enabled=settings_data.get("music_enabled", False),
                         music_id=str(settings_data.get("music_track")) if (settings_data.get("music_track") and str(settings_data.get("music_track")).isdigit()) else None,
                         trigger_source="hermes_scheduler",
+                        content_mode=settings_data.get("content_mode", "quote"),
                     )
                 )
+
+    # ─── Always Update Mode: Continuous News-Driven Queue ─────────────────────
+
+    def _get_known_article_urls(self, user_id: int) -> set[str]:
+        """URLs already queued or already posted — used to avoid rediscovering the
+        same article on every tick."""
+        conn = get_dict_connection()
+        try:
+            cur = conn.cursor()
+            cur.execute("SELECT article_url FROM ai_image_news_queue WHERE user_id = ?", (user_id,))
+            urls = {row["article_url"] for row in cur.fetchall() if row["article_url"]}
+            cur.execute("SELECT source_url FROM ai_image_runs WHERE user_id = ? AND source_url IS NOT NULL", (user_id,))
+            urls |= {row["source_url"] for row in cur.fetchall() if row["source_url"]}
+            return urls
+        finally:
+            conn.close()
+
+    def enqueue_news_articles(self, user_id: int, articles: list[dict[str, Any]]) -> int:
+        """Insert newly discovered articles into the queue, skipping ones already
+        queued (UNIQUE(user_id, article_url) handles the dedup atomically)."""
+        if not articles:
+            return 0
+        conn = get_dict_connection()
+        inserted = 0
+        try:
+            for art in articles:
+                url = (art.get("url") or "").strip()
+                if not url:
+                    continue
+                cur = conn.execute(
+                    """
+                    INSERT OR IGNORE INTO ai_image_news_queue (
+                        user_id, topic, article_title, article_url, article_summary, source_name
+                    ) VALUES (?, ?, ?, ?, ?, ?)
+                    """,
+                    (user_id, art.get("topic", ""), art.get("title", ""), url, art.get("summary", ""), art.get("source", "")),
+                )
+                if cur.rowcount:
+                    inserted += 1
+            conn.commit()
+            return inserted
+        finally:
+            conn.close()
+
+    def get_news_queue(self, user_id: int = 1, limit: int = 50) -> list[dict[str, Any]]:
+        """Fetch the most recent discovered/processed news queue items for a user."""
+        conn = get_dict_connection()
+        try:
+            cur = conn.cursor()
+            cur.execute(
+                "SELECT * FROM ai_image_news_queue WHERE user_id = ? ORDER BY created_at DESC LIMIT ?",
+                (user_id, limit),
+            )
+            return [dict(r) for r in cur.fetchall()]
+        finally:
+            conn.close()
+
+    def _claim_next_queue_item(self, user_id: int) -> Optional[dict[str, Any]]:
+        """Atomically claim the oldest pending queue item so only one worker processes it."""
+        conn = get_dict_connection()
+        try:
+            cur = conn.cursor()
+            cur.execute(
+                "SELECT * FROM ai_image_news_queue WHERE user_id = ? AND status = 'pending' ORDER BY created_at ASC LIMIT 1",
+                (user_id,),
+            )
+            row = cur.fetchone()
+            if not row:
+                return None
+            item = dict(row)
+            cur = conn.execute(
+                "UPDATE ai_image_news_queue SET status = 'processing' WHERE id = ? AND status = 'pending'",
+                (item["id"],),
+            )
+            conn.commit()
+            if cur.rowcount == 0:
+                return None  # Another worker claimed it first
+            return item
+        finally:
+            conn.close()
+
+    def _finish_queue_item(self, queue_id: int, status: str, run_id: Optional[int] = None, error: Optional[str] = None) -> None:
+        conn = get_dict_connection()
+        try:
+            conn.execute(
+                """
+                UPDATE ai_image_news_queue
+                SET status = ?, run_id = ?, error_message = ?, processed_at = CURRENT_TIMESTAMP
+                WHERE id = ?
+                """,
+                (status, run_id, error, queue_id),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
+    async def _tick_always_update(self, user_id: int, settings_data: dict[str, Any]) -> None:
+        """One pass of Always Update mode: discover fresh news (rate-limited by
+        always_update_interval_min), queue it, then process a single oldest
+        pending article so publishing stays naturally throttled by the interval
+        instead of bursting every discovered article at once."""
+        interval_min = max(5, min(120, int(settings_data.get("always_update_interval_min", 20) or 20)))
+        now_wib = dt.datetime.now(self.WIB)
+
+        last_check_raw = settings_data.get("last_news_check_at")
+        due_for_check = True
+        if last_check_raw:
+            try:
+                last_check = dt.datetime.fromisoformat(str(last_check_raw).replace("Z", "+00:00"))
+                if last_check.tzinfo is None:
+                    last_check = last_check.replace(tzinfo=self.WIB)
+                due_for_check = (now_wib - last_check).total_seconds() >= interval_min * 60
+            except Exception:
+                due_for_check = True
+
+        if due_for_check:
+            topics = settings_data.get("topics") or []
+            if topics:
+                known_urls = self._get_known_article_urls(user_id)
+                articles = await self.discover_news_for_topics(topics, exclude_urls=known_urls)
+                inserted = self.enqueue_news_articles(user_id, articles)
+                if inserted:
+                    logger.info(f"[AIImageStudio] Always Update: queued {inserted} new article(s) for user {user_id}")
+            conn = get_dict_connection()
+            try:
+                conn.execute(
+                    "UPDATE ai_image_settings SET last_news_check_at = ? WHERE user_id = ?",
+                    (now_wib.isoformat(), user_id),
+                )
+                conn.commit()
+            finally:
+                conn.close()
+
+        item = self._claim_next_queue_item(user_id)
+        if not item:
+            return
+
+        logger.info(f"[AIImageStudio] Always Update: processing queued article for user {user_id}: {item['article_title'][:80]}")
+        try:
+            result = await self.execute_generation_session(
+                user_id=user_id,
+                topic=item.get("topic") or "",
+                session_name="Hermes Always Update",
+                image_count=settings_data.get("images_per_session", 2),
+                aspect_ratio=settings_data.get("aspect_ratio", "9:16"),
+                template_preset=settings_data.get("template_preset", "auto"),
+                font_family=settings_data.get("font_family", "auto"),
+                model_name=settings_data.get("model_name", "auto"),
+                background_source=settings_data.get("background_source", "ai_gemini"),
+                media_type=settings_data.get("media_type", "image"),
+                footage_duration_sec=settings_data.get("footage_duration_sec", 8),
+                auto_post=settings_data.get("auto_post_enabled", False),
+                target_account_ids=settings_data.get("target_account_ids", []),
+                music_enabled=settings_data.get("music_enabled", False),
+                music_id=str(settings_data.get("music_track")) if (settings_data.get("music_track") and str(settings_data.get("music_track")).isdigit()) else None,
+                trigger_source="always_update",
+                content_mode="news",
+                news_article={
+                    "topic": item.get("topic") or "",
+                    "title": item.get("article_title") or "",
+                    "summary": item.get("article_summary") or "",
+                    "source": item.get("source_name") or "",
+                    "url": item.get("article_url") or "",
+                },
+            )
+            self._finish_queue_item(item["id"], status="done", run_id=result.get("id"))
+        except Exception as e:
+            logger.error(f"[AIImageStudio] Always Update: failed processing article '{item['article_title'][:80]}': {e}")
+            self._finish_queue_item(item["id"], status="failed", error=str(e))
 
     def get_history(self, user_id: int = 1, limit: int = 40) -> list[dict[str, Any]]:
         """Fetch past generation runs."""

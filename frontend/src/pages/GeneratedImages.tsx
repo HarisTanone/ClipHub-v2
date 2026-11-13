@@ -50,6 +50,9 @@ import {
   ImageStudioProgress,
   PlatformAccountInfo,
   TikTokMusicTrack,
+  NewsArticlePreview,
+  NewsQueueItem,
+  DesignAnalysisResult,
   API_BASE,
 } from "@/lib/api";
 import { cn } from "@/lib/utils";
@@ -136,7 +139,23 @@ export function GeneratedImagesPage() {
 
   // Custom Media Upload State
   const [customUploadUrl, setCustomUploadUrl] = useState<string>("");
+  const [customUploadLocalPath, setCustomUploadLocalPath] = useState<string>("");
   const [uploadingMedia, setUploadingMedia] = useState<boolean>(false);
+
+  // Design Reference / Clone Design Wizard State (Instant tab only)
+  const [cloneReferencePreviewUrl, setCloneReferencePreviewUrl] = useState<string>("");
+  const [cloneAnalyzing, setCloneAnalyzing] = useState<boolean>(false);
+  const [cloneAnalysis, setCloneAnalysis] = useState<DesignAnalysisResult | null>(null);
+  const [clonePresetName, setClonePresetName] = useState<string>("");
+  const [cloneSaving, setCloneSaving] = useState<boolean>(false);
+
+  // Automation: Multi-Topic News Discovery preview
+  const [newsPreviewArticles, setNewsPreviewArticles] = useState<NewsArticlePreview[]>([]);
+  const [loadingNewsPreview, setLoadingNewsPreview] = useState<boolean>(false);
+
+  // Automation: Always Update news queue
+  const [newsQueue, setNewsQueue] = useState<NewsQueueItem[]>([]);
+  const [loadingNewsQueue, setLoadingNewsQueue] = useState<boolean>(false);
 
   // Preview & Result State
   const [latestResult, setLatestResult] = useState<any | null>(null);
@@ -200,8 +219,19 @@ export function GeneratedImagesPage() {
   const fetchInitialData = async () => {
     setLoading(true);
     try {
-      const [settingsRes, tplRes, fontsRes, accRes, histRes, arRes, accentsRes] = await Promise.all([
-        imageStudioApi.getSettings(),
+      // Settings is fetched and applied on its own, ahead of the slower/unrelated
+      // calls below (social accounts hits an external API). Bundling it into one
+      // Promise.all used to mean any toggle the user clicked before that slowest
+      // call resolved got silently clobbered by this initial setSettings.
+      const settingsRes = await imageStudioApi.getSettings();
+      if (settingsRes.success && settingsRes.data) {
+        setSettings(settingsRes.data);
+        if (settingsRes.data.target_account_ids) {
+          setSelectedAccountIds(settingsRes.data.target_account_ids);
+        }
+      }
+
+      const [tplRes, fontsRes, accRes, histRes, arRes, accentsRes] = await Promise.all([
         imageStudioApi.getTemplates(),
         imageStudioApi.getFonts(),
         socialApi.getAccounts().catch(() => ({ docs: [] })),
@@ -210,12 +240,6 @@ export function GeneratedImagesPage() {
         imageStudioApi.getAccents().catch(() => ({ data: [] })),
       ]);
 
-      if (settingsRes.success && settingsRes.data) {
-        setSettings(settingsRes.data);
-        if (settingsRes.data.target_account_ids) {
-          setSelectedAccountIds(settingsRes.data.target_account_ids);
-        }
-      }
       if (tplRes.success) setTemplates(tplRes.data);
       if (fontsRes.success) {
         setFonts(fontsRes.data);
@@ -251,6 +275,9 @@ export function GeneratedImagesPage() {
         music_enabled: settings.music_enabled,
         music_track: settings.music_track,
         footage_duration_sec: settings.footage_duration_sec,
+        content_mode: settings.content_mode,
+        publish_mode: settings.publish_mode,
+        always_update_interval_min: settings.always_update_interval_min,
       });
       if (res.success && res.data) {
         setSettings(res.data);
@@ -387,6 +414,14 @@ export function GeneratedImagesPage() {
     return () => stopProgressPolling();
   }, []);
 
+  // Auto-refresh the Always Update news queue once when its panel becomes visible
+  useEffect(() => {
+    if (activeTab === "automation" && settings?.publish_mode === "always_update") {
+      handleRefreshNewsQueue();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeTab, settings?.publish_mode]);
+
   const handleInstantGenerate = async () => {
     setGenerating(true);
     setLatestResult(null);
@@ -408,7 +443,8 @@ export function GeneratedImagesPage() {
         font_family: selectedFont,
         model_name: selectedModel === "auto" ? undefined : selectedModel,
         aspect_ratio: aspectRatio,
-        background_source: customUploadUrl ? "user_upload" : backgroundSource,
+        background_source: backgroundSource,
+        custom_background_path: customUploadLocalPath || undefined,
         media_type: mediaType,
         image_count: imageCount,
         auto_post: autoPostInstant,
@@ -476,6 +512,31 @@ export function GeneratedImagesPage() {
     }
   };
 
+  const handleCheckNewsNow = async () => {
+    if (!settings?.topics.length) return;
+    setLoadingNewsPreview(true);
+    try {
+      const res = await imageStudioApi.discoverNews(settings.topics);
+      if (res.success) setNewsPreviewArticles(res.data);
+    } catch (err: any) {
+      alert(`Gagal mencari berita: ${err.message || err}`);
+    } finally {
+      setLoadingNewsPreview(false);
+    }
+  };
+
+  const handleRefreshNewsQueue = async () => {
+    setLoadingNewsQueue(true);
+    try {
+      const res = await imageStudioApi.getNewsQueue();
+      if (res.success) setNewsQueue(res.data);
+    } catch {
+      // Silent — the queue panel just keeps showing its last known state.
+    } finally {
+      setLoadingNewsQueue(false);
+    }
+  };
+
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>, type: "image" | "music") => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -488,6 +549,7 @@ export function GeneratedImagesPage() {
       if (res.success && res.url) {
         if (type === "image") {
           setCustomUploadUrl(res.url);
+          setCustomUploadLocalPath(res.local_path || "");
           setBackgroundSource("user_upload");
         } else if (settings) {
           setSettings({ ...settings, music_track: res.url });
@@ -497,6 +559,56 @@ export function GeneratedImagesPage() {
       alert(`Upload gagal: ${err.message || err}`);
     } finally {
       setUploadingMedia(false);
+    }
+  };
+
+  const handleAnalyzeDesignReference = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setCloneAnalysis(null);
+    setCloneReferencePreviewUrl(URL.createObjectURL(file));
+    setCloneAnalyzing(true);
+    try {
+      const formData = new FormData();
+      formData.append("file", file);
+      const res = await imageStudioApi.analyzeDesign(formData);
+      if (res.success && res.data) {
+        setCloneAnalysis(res.data);
+        setClonePresetName(res.data.suggested_name || "Preset Clone Design");
+      }
+    } catch (err: any) {
+      alert(`Analisis desain gagal: ${err.message || err}`);
+    } finally {
+      setCloneAnalyzing(false);
+    }
+  };
+
+  const handleSaveClonePreset = async () => {
+    if (!cloneAnalysis || !clonePresetName.trim()) return;
+    setCloneSaving(true);
+    try {
+      const res = await imageStudioApi.cloneDesign({
+        name: clonePresetName.trim(),
+        primary_font: cloneAnalysis.primary_font,
+        secondary_font: cloneAnalysis.secondary_font,
+        recommended_accent: cloneAnalysis.recommended_accent,
+        layout_type: cloneAnalysis.layout_type,
+        vibe: cloneAnalysis.vibe,
+      });
+      if (res.success && res.data) {
+        const tRes = await imageStudioApi.getTemplates();
+        if (tRes.success) setTemplates(tRes.data);
+        setSelectedTemplate(res.data.id);
+        setAccentColor(cloneAnalysis.recommended_accent);
+        setBackgroundSource("ai_gemini");
+        setCloneAnalysis(null);
+        setCloneReferencePreviewUrl("");
+        setClonePresetName("");
+      }
+    } catch (err: any) {
+      alert(`Gagal menyimpan preset: ${err.message || err}`);
+    } finally {
+      setCloneSaving(false);
     }
   };
 
@@ -1087,12 +1199,13 @@ export function GeneratedImagesPage() {
                 <label className="text-[11px] font-medium text-zinc-400 uppercase tracking-wider block mb-1.5">
                   Sumber Latar Belakang
                 </label>
-                <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+                <div className="grid grid-cols-2 md:grid-cols-5 gap-2">
                   {[
                     { id: "ai_gemini", label: "AI Gemini 3.1", desc: "Generated Image API" },
                     { id: "pexels", label: "Pexels Stock", desc: "Stock Foto/Video" },
                     { id: "pixabay", label: "Pixabay Stock", desc: "Royalty Free" },
-                    { id: "user_upload", label: "Upload Sendiri", desc: "Foto / Footage Anda" },
+                    { id: "user_upload", label: "Upload Background", desc: "Foto / Footage Anda" },
+                    { id: "design_clone", label: "Clone Design", desc: "Tiru gaya dari referensi" },
                   ].map((src) => (
                     <button
                       key={src.id}
@@ -1154,7 +1267,7 @@ export function GeneratedImagesPage() {
                 {backgroundSource === "user_upload" && (
                   <div className="mt-3 p-3 rounded-xl border border-dashed border-zinc-700 bg-zinc-900/80 flex items-center justify-between">
                     <div className="text-xs text-zinc-300">
-                      {customUploadUrl ? "Foto kustom terunggah." : "Pilih file gambar atau video dari komputer Anda"}
+                      {customUploadUrl ? "Foto kustom terunggah — akan dipakai langsung sebagai background." : "Pilih file gambar atau video dari komputer Anda"}
                     </div>
                     <label className="cursor-pointer rounded-lg bg-zinc-800 hover:bg-zinc-700 text-xs px-3 py-1.5 text-zinc-200 font-medium transition-colors">
                       <input
@@ -1166,6 +1279,78 @@ export function GeneratedImagesPage() {
                       />
                       <span>{uploadingMedia ? "Mengunggah..." : "Pilih File"}</span>
                     </label>
+                  </div>
+                )}
+
+                {backgroundSource === "design_clone" && (
+                  <div className="mt-3 p-3.5 rounded-xl border border-dashed border-purple-700/50 bg-purple-500/5 space-y-3">
+                    <p className="text-[11px] text-zinc-400">
+                      Upload desain referensi (poster, quote card, dsb). AI akan menganalisis tipografi, warna, dan tata letaknya —
+                      <span className="text-zinc-300"> bukan foto-nya</span> — lalu dijadikan preset tipografi yang bisa dipakai ulang.
+                    </p>
+
+                    {!cloneAnalysis && !cloneAnalyzing && (
+                      <label className="flex items-center justify-center gap-2 cursor-pointer rounded-lg border border-purple-500/40 bg-purple-500/10 hover:bg-purple-500/20 text-xs px-3 py-2.5 text-purple-200 font-medium transition-colors">
+                        <Upload className="h-3.5 w-3.5" />
+                        <input type="file" accept="image/*" className="hidden" onChange={handleAnalyzeDesignReference} />
+                        <span>Upload Gambar Referensi</span>
+                      </label>
+                    )}
+
+                    {cloneAnalyzing && (
+                      <div className="flex items-center gap-2 text-xs text-purple-300 py-2">
+                        <RefreshCw className="h-3.5 w-3.5 animate-spin" />
+                        <span>AI sedang menganalisis gaya desain referensi...</span>
+                      </div>
+                    )}
+
+                    {cloneAnalysis && (
+                      <div className="space-y-3">
+                        <div className="flex items-center gap-3">
+                          {cloneReferencePreviewUrl && (
+                            <img src={cloneReferencePreviewUrl} alt="Referensi" className="h-20 w-14 object-cover rounded-lg border border-zinc-700" />
+                          )}
+                          <div className="flex-1 space-y-1 text-[11px] text-zinc-400">
+                            <p className="text-zinc-300">{cloneAnalysis.vibe}</p>
+                            <div className="flex items-center gap-2 flex-wrap">
+                              <span className="px-1.5 py-0.5 rounded bg-zinc-800 border border-zinc-700 text-zinc-300">
+                                {LAYOUT_ENGINE_OPTIONS.find((l) => l.id === cloneAnalysis.layout_type)?.label || cloneAnalysis.layout_type}
+                              </span>
+                              <span className="px-1.5 py-0.5 rounded bg-zinc-800 border border-zinc-700 text-zinc-300">{cloneAnalysis.primary_font}</span>
+                              <span
+                                className="h-3.5 w-3.5 rounded-full border border-white/20"
+                                style={{ backgroundColor: cloneAnalysis.recommended_accent }}
+                                title={cloneAnalysis.recommended_accent}
+                              />
+                            </div>
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <input
+                            type="text"
+                            value={clonePresetName}
+                            onChange={(e) => setClonePresetName(e.target.value)}
+                            placeholder="Nama preset..."
+                            className="flex-1 rounded-lg bg-zinc-950 border border-zinc-800 px-3 py-1.5 text-xs text-zinc-200 placeholder-zinc-600 focus:outline-none focus:border-purple-500"
+                          />
+                          <button
+                            type="button"
+                            onClick={handleSaveClonePreset}
+                            disabled={cloneSaving || !clonePresetName.trim()}
+                            className="shrink-0 px-3 py-1.5 rounded-lg bg-purple-600 hover:bg-purple-500 text-white text-xs font-semibold disabled:opacity-50 transition-colors"
+                          >
+                            {cloneSaving ? "Menyimpan..." : "Simpan sebagai Preset"}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => { setCloneAnalysis(null); setCloneReferencePreviewUrl(""); setClonePresetName(""); }}
+                            className="shrink-0 px-2.5 py-1.5 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-zinc-400 text-xs transition-colors"
+                          >
+                            Batal
+                          </button>
+                        </div>
+                      </div>
+                    )}
                   </div>
                 )}
               </div>
@@ -1897,7 +2082,7 @@ export function GeneratedImagesPage() {
                   ))}
                 </div>
                 <p className="text-[10px] text-zinc-500 mt-1.5">
-                  Upload manual tidak tersedia untuk sesi automasi karena berjalan tanpa interaksi pengguna.
+                  Upload Background dan Clone Design butuh interaksi manual, jadi tidak tersedia untuk sesi automasi — pakai tab Instant Studio untuk membuat preset Clone Design, lalu pilih preset-nya di Template Tipografi di atas.
                 </p>
               </div>
 
@@ -1941,95 +2126,212 @@ export function GeneratedImagesPage() {
               </div>
             </div>
 
-            {/* Daily Slots Manager */}
+            {/* Publishing Mode: Scheduled Slots vs Always Update */}
             <div className="space-y-3">
-              <div className="flex items-center justify-between">
-                <div>
-                  <h4 className="text-xs font-semibold text-zinc-200 uppercase tracking-wider">
-                    Jadwal Slot Sesi Harian (Pagi / Siang / Malam)
-                  </h4>
-                  <p className="text-[11px] text-zinc-500">
-                    Tentukan waktu dan kuota jumlah foto yang dihasilkan per sesi
-                  </p>
-                </div>
+              <div>
+                <h4 className="text-xs font-semibold text-zinc-200 uppercase tracking-wider">
+                  Mode Publikasi
+                </h4>
+                <p className="text-[11px] text-zinc-500">
+                  Pilih antara jadwal slot tetap, atau pemantauan berita terus-menerus tanpa batas jumlah post harian
+                </p>
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                 <button
                   type="button"
-                  onClick={() => {
-                    if (!settings) return;
-                    const newSlot: ImageStudioSlot = {
-                      name: `Sesi ${settings.daily_slots.length + 1}`,
-                      time: "12:00",
-                      count: 2,
-                      enabled: true,
-                    };
-                    setSettings({ ...settings, daily_slots: [...settings.daily_slots, newSlot] });
-                  }}
-                  className="flex items-center gap-1.5 rounded-lg bg-zinc-800 hover:bg-zinc-700 px-3 py-1.5 text-xs text-zinc-300 font-medium transition-colors"
+                  onClick={() => settings && setSettings({ ...settings, publish_mode: "scheduled" })}
+                  className={cn(
+                    "flex flex-col text-left p-3 rounded-xl border text-xs transition-all",
+                    (settings?.publish_mode || "scheduled") === "scheduled"
+                      ? "border-emerald-500 bg-emerald-500/10 text-white ring-1 ring-emerald-500/30"
+                      : "border-zinc-800 bg-zinc-900/60 text-zinc-400 hover:border-zinc-700 hover:text-zinc-200"
+                  )}
                 >
-                  <Plus className="h-3.5 w-3.5" />
-                  <span>Tambah Slot</span>
+                  <span className="font-semibold flex items-center gap-1.5"><Calendar className="h-3.5 w-3.5" /> Scheduled Mode</span>
+                  <span className="text-[10px] text-zinc-500 mt-0.5">Posting mengikuti slot Pagi, Siang, Malam</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => settings && setSettings({ ...settings, publish_mode: "always_update" })}
+                  className={cn(
+                    "flex flex-col text-left p-3 rounded-xl border text-xs transition-all",
+                    settings?.publish_mode === "always_update"
+                      ? "border-emerald-500 bg-emerald-500/10 text-white ring-1 ring-emerald-500/30"
+                      : "border-zinc-800 bg-zinc-900/60 text-zinc-400 hover:border-zinc-700 hover:text-zinc-200"
+                  )}
+                >
+                  <span className="font-semibold flex items-center gap-1.5"><RefreshCw className="h-3.5 w-3.5" /> Always Update Mode</span>
+                  <span className="text-[10px] text-zinc-500 mt-0.5">Hermes terus memantau berita baru, tidak dibatasi jumlah posting harian</span>
                 </button>
               </div>
-
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-                {settings?.daily_slots.map((slot, idx) => (
-                  <div key={idx} className="rounded-xl border border-zinc-800 bg-zinc-900/70 p-4 space-y-3">
-                    <div className="flex items-center justify-between">
-                      <input
-                        type="text"
-                        value={slot.name}
-                        onChange={(e) => {
-                          const name = e.target.value;
-                          const updated = settings.daily_slots.map((s, i) => (i === idx ? { ...s, name } : s));
-                          setSettings({ ...settings, daily_slots: updated });
-                        }}
-                        className="bg-transparent font-semibold text-xs text-zinc-200 focus:outline-none border-b border-transparent focus:border-zinc-700"
-                      />
-                      <button
-                        type="button"
-                        onClick={() => {
-                          const updated = settings.daily_slots.filter((_, i) => i !== idx);
-                          setSettings({ ...settings, daily_slots: updated });
-                        }}
-                        className="text-zinc-500 hover:text-rose-400 p-1"
-                      >
-                        <Trash2 className="h-3.5 w-3.5" />
-                      </button>
-                    </div>
-
-                    <div className="flex items-center gap-2">
-                      <Clock className="h-3.5 w-3.5 text-cyan-400 shrink-0" />
-                      <input
-                        type="time"
-                        value={slot.time}
-                        onChange={(e) => {
-                          const time = e.target.value;
-                          const updated = settings.daily_slots.map((s, i) => (i === idx ? { ...s, time } : s));
-                          setSettings({ ...settings, daily_slots: updated });
-                        }}
-                        className="w-full rounded-lg bg-zinc-950 border border-zinc-800 px-2.5 py-1 text-xs text-zinc-200 focus:outline-none focus:border-cyan-500"
-                      />
-                    </div>
-
-                    <div className="flex items-center justify-between text-xs text-zinc-400">
-                      <span>Jumlah Foto:</span>
-                      <input
-                        type="number"
-                        min={1}
-                        max={10}
-                        value={slot.count}
-                        onChange={(e) => {
-                          const count = parseInt(e.target.value) || 1;
-                          const updated = settings.daily_slots.map((s, i) => (i === idx ? { ...s, count } : s));
-                          setSettings({ ...settings, daily_slots: updated });
-                        }}
-                        className="w-16 rounded-lg bg-zinc-950 border border-zinc-800 px-2 py-0.5 text-xs text-right text-zinc-200 focus:outline-none"
-                      />
-                    </div>
-                  </div>
-                ))}
-              </div>
             </div>
+
+            {(settings?.publish_mode || "scheduled") === "scheduled" ? (
+              /* Daily Slots Manager */
+              <div className="space-y-3">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <h4 className="text-xs font-semibold text-zinc-200 uppercase tracking-wider">
+                      Jadwal Slot Sesi Harian (Pagi / Siang / Malam)
+                    </h4>
+                    <p className="text-[11px] text-zinc-500">
+                      Tentukan waktu dan kuota jumlah foto yang dihasilkan per sesi
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (!settings) return;
+                      const newSlot: ImageStudioSlot = {
+                        name: `Sesi ${settings.daily_slots.length + 1}`,
+                        time: "12:00",
+                        count: 2,
+                        enabled: true,
+                      };
+                      setSettings({ ...settings, daily_slots: [...settings.daily_slots, newSlot] });
+                    }}
+                    className="flex items-center gap-1.5 rounded-lg bg-zinc-800 hover:bg-zinc-700 px-3 py-1.5 text-xs text-zinc-300 font-medium transition-colors"
+                  >
+                    <Plus className="h-3.5 w-3.5" />
+                    <span>Tambah Slot</span>
+                  </button>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                  {settings?.daily_slots.map((slot, idx) => (
+                    <div key={idx} className="rounded-xl border border-zinc-800 bg-zinc-900/70 p-4 space-y-3">
+                      <div className="flex items-center justify-between">
+                        <input
+                          type="text"
+                          value={slot.name}
+                          onChange={(e) => {
+                            const name = e.target.value;
+                            const updated = settings.daily_slots.map((s, i) => (i === idx ? { ...s, name } : s));
+                            setSettings({ ...settings, daily_slots: updated });
+                          }}
+                          className="bg-transparent font-semibold text-xs text-zinc-200 focus:outline-none border-b border-transparent focus:border-zinc-700"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const updated = settings.daily_slots.filter((_, i) => i !== idx);
+                            setSettings({ ...settings, daily_slots: updated });
+                          }}
+                          className="text-zinc-500 hover:text-rose-400 p-1"
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </button>
+                      </div>
+
+                      <div className="flex items-center gap-2">
+                        <Clock className="h-3.5 w-3.5 text-cyan-400 shrink-0" />
+                        <input
+                          type="time"
+                          value={slot.time}
+                          onChange={(e) => {
+                            const time = e.target.value;
+                            const updated = settings.daily_slots.map((s, i) => (i === idx ? { ...s, time } : s));
+                            setSettings({ ...settings, daily_slots: updated });
+                          }}
+                          className="w-full rounded-lg bg-zinc-950 border border-zinc-800 px-2.5 py-1 text-xs text-zinc-200 focus:outline-none focus:border-cyan-500"
+                        />
+                      </div>
+
+                      <div className="flex items-center justify-between text-xs text-zinc-400">
+                        <span>Jumlah Foto:</span>
+                        <input
+                          type="number"
+                          min={1}
+                          max={10}
+                          value={slot.count}
+                          onChange={(e) => {
+                            const count = parseInt(e.target.value) || 1;
+                            const updated = settings.daily_slots.map((s, i) => (i === idx ? { ...s, count } : s));
+                            setSettings({ ...settings, daily_slots: updated });
+                          }}
+                          className="w-16 rounded-lg bg-zinc-950 border border-zinc-800 px-2 py-0.5 text-xs text-right text-zinc-200 focus:outline-none"
+                        />
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ) : (
+              /* Always Update Panel: check interval + live news queue */
+              <div className="space-y-3">
+                <div className="rounded-xl border border-zinc-800 bg-zinc-900/70 p-4 space-y-3">
+                  <div className="flex items-center justify-between gap-4">
+                    <div>
+                      <label className="text-[11px] font-medium text-zinc-400 uppercase tracking-wider block mb-1">
+                        Interval Cek Berita (menit)
+                      </label>
+                      <p className="text-[10px] text-zinc-500">
+                        Semakin kecil interval, semakin cepat Hermes bereaksi terhadap berita baru — tapi semakin besar beban ke server.
+                      </p>
+                    </div>
+                    <input
+                      type="number"
+                      min={5}
+                      max={120}
+                      value={settings?.always_update_interval_min || 20}
+                      onChange={(e) =>
+                        settings && setSettings({ ...settings, always_update_interval_min: Math.max(5, Math.min(120, parseInt(e.target.value) || 20)) })
+                      }
+                      className="w-20 shrink-0 rounded-lg bg-zinc-950 border border-zinc-800 px-2.5 py-1.5 text-xs text-right text-zinc-200 focus:outline-none focus:border-emerald-500"
+                    />
+                  </div>
+                  {settings?.last_news_check_at && (
+                    <p className="text-[10px] text-zinc-500">
+                      Pengecekan terakhir: {new Date(settings.last_news_check_at).toLocaleString("id-ID")}
+                    </p>
+                  )}
+                </div>
+
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between">
+                    <h4 className="text-xs font-semibold text-zinc-200 uppercase tracking-wider">
+                      Antrean Berita ({newsQueue.length})
+                    </h4>
+                    <button
+                      type="button"
+                      onClick={handleRefreshNewsQueue}
+                      disabled={loadingNewsQueue}
+                      className="flex items-center gap-1.5 text-[11px] text-zinc-400 hover:text-zinc-200 transition-colors disabled:opacity-50"
+                    >
+                      <RefreshCw className={cn("h-3 w-3", loadingNewsQueue && "animate-spin")} />
+                      <span>Muat Ulang</span>
+                    </button>
+                  </div>
+                  <div className="space-y-1.5 max-h-72 overflow-y-auto pr-1">
+                    {newsQueue.length === 0 ? (
+                      <p className="text-xs text-zinc-500 py-4 text-center">
+                        Belum ada antrean. Antrean akan terisi otomatis setiap interval cek berita tercapai.
+                      </p>
+                    ) : (
+                      newsQueue.map((item) => (
+                        <div key={item.id} className="flex items-center justify-between gap-3 rounded-lg border border-zinc-800 bg-zinc-900/60 px-3 py-2">
+                          <div className="min-w-0">
+                            <p className="text-xs text-zinc-200 truncate">{item.article_title}</p>
+                            <p className="text-[10px] text-zinc-500 truncate">{item.source_name} — {item.topic}</p>
+                          </div>
+                          <span
+                            className={cn(
+                              "shrink-0 px-2 py-0.5 rounded-full text-[10px] font-medium border",
+                              item.status === "done" && "bg-emerald-500/15 text-emerald-300 border-emerald-500/30",
+                              item.status === "pending" && "bg-zinc-800 text-zinc-400 border-zinc-700",
+                              item.status === "processing" && "bg-cyan-500/15 text-cyan-300 border-cyan-500/30",
+                              item.status === "failed" && "bg-rose-500/15 text-rose-300 border-rose-500/30"
+                            )}
+                          >
+                            {item.status}
+                          </span>
+                        </div>
+                      ))
+                    )}
+                  </div>
+                </div>
+              </div>
+            )}
 
             {/* Topic Rotation */}
             <div className="space-y-3 pt-2">
@@ -2045,6 +2347,62 @@ export function GeneratedImagesPage() {
                     Masukkan briefing, topik, atau arahan konten apapun (bebas tanpa batasan domain). Hermes akan mandiri mengeksplorasi sudut pandang unik, merumuskan teks, dan menciptakan prompt visual secara kreatif setiap harinya.
                   </p>
                 </div>
+              </div>
+
+              {/* Mode Konten Hermes: Quote / News / Both */}
+              <div className="space-y-1.5">
+                <span className="text-[10px] text-zinc-500 uppercase tracking-wider block">Mode Konten Hermes:</span>
+                <div className="grid grid-cols-3 gap-1.5">
+                  {[
+                    { id: "quote", label: "Quote", desc: "Kutipan & wisdom dari AI" },
+                    { id: "news", label: "Berita Terkini", desc: "Cari berita nyata per topik" },
+                    { id: "both", label: "Keduanya", desc: "Acak quote & berita" },
+                  ].map((m) => (
+                    <button
+                      key={m.id}
+                      type="button"
+                      onClick={() => settings && setSettings({ ...settings, content_mode: m.id })}
+                      className={cn(
+                        "flex flex-col text-left p-2 rounded-xl border text-xs transition-all",
+                        (settings?.content_mode || "quote") === m.id
+                          ? "border-purple-500 bg-purple-500/10 text-white ring-1 ring-purple-500/30"
+                          : "border-zinc-800 bg-zinc-900/60 text-zinc-400 hover:border-zinc-700 hover:text-zinc-200"
+                      )}
+                    >
+                      <span className="font-semibold">{m.label}</span>
+                      <span className="text-[10px] text-zinc-500">{m.desc}</span>
+                    </button>
+                  ))}
+                </div>
+
+                {(settings?.content_mode === "news" || settings?.content_mode === "both") && (
+                  <div className="mt-2 p-3 rounded-xl border border-cyan-800/40 bg-cyan-500/5 space-y-2">
+                    <div className="flex items-center justify-between gap-2">
+                      <p className="text-[11px] text-zinc-400">
+                        Hermes akan mencari berita real-time untuk tiap topik di bawah (Google News, YouTube, TikTok) sebelum membuat konten.
+                      </p>
+                      <button
+                        type="button"
+                        onClick={handleCheckNewsNow}
+                        disabled={loadingNewsPreview || !settings?.topics.length}
+                        className="shrink-0 flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-cyan-600 hover:bg-cyan-500 text-white text-[11px] font-semibold disabled:opacity-50 transition-colors"
+                      >
+                        <RefreshCw className={cn("h-3 w-3", loadingNewsPreview && "animate-spin")} />
+                        <span>Cek Berita Sekarang</span>
+                      </button>
+                    </div>
+                    {newsPreviewArticles.length > 0 && (
+                      <div className="space-y-1.5 max-h-56 overflow-y-auto pr-1">
+                        {newsPreviewArticles.map((a, i) => (
+                          <div key={i} className="rounded-lg border border-zinc-800 bg-zinc-900/70 px-3 py-2">
+                            <p className="text-xs text-zinc-200">{a.title}</p>
+                            <p className="text-[10px] text-zinc-500 mt-0.5">{a.source} — {a.recency} — topik: {a.topic}</p>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
               </div>
 
               {/* Quick Inspiration Badges */}
@@ -2507,6 +2865,12 @@ export function GeneratedImagesPage() {
                   className="rounded-2xl border border-zinc-800 bg-[#0e0e12] p-5 space-y-4 flex flex-col justify-between"
                 >
                   <div className="space-y-3">
+                    <img
+                      src={imageStudioApi.getTemplatePreviewUrl(tpl.id, tpl.updated_at)}
+                      alt={`Preview ${tpl.name}`}
+                      loading="lazy"
+                      className="w-full aspect-[9/16] max-h-56 object-cover rounded-xl border border-zinc-800 bg-zinc-950"
+                    />
                     <div className="flex items-center justify-between">
                       <div className="flex items-center gap-2 min-w-0">
                         <span className="text-sm font-bold text-white truncate">{tpl.name}</span>

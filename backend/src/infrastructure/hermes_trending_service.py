@@ -185,6 +185,7 @@ class HermesTrendingService:
                         news_snippet_el = item.find("ht:news_item/ht:news_item_snippet", ns)
                         source_el = item.find("source")
                         pubdate_el = item.find("pubDate")
+                        link_el = item.find("link")
 
                         title = (title_el.text or "").strip() if title_el is not None else ""
                         if not title:
@@ -209,12 +210,14 @@ class HermesTrendingService:
                         news_title = (news_title_el.text or "").strip() if news_title_el is not None else ""
                         news_snippet = (news_snippet_el.text or "").strip() if news_snippet_el is not None else ""
                         src_name = (source_el.text or "").strip() if source_el is not None else source_label
+                        article_link = (link_el.text or "").strip() if link_el is not None else ""
 
                         items.append({
                             "title": title,
                             "traffic": approx or "Trending",
                             "summary": news_snippet or clean_desc or news_title,
                             "news_title": news_title,
+                            "url": article_link,
                             "source": src_name if kw else "Google Trends",
                             "region": region_clean,
                             "timeframe": "24 jam terakhir" if timeframe == "24h" else timeframe,

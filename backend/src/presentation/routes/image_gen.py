@@ -11,9 +11,11 @@ from pydantic import BaseModel, Field
 from src.infrastructure.ai_image_studio_service import (
     ASSETS_MUSIC_DIR,
     OUTPUT_DIR,
+    PREVIEW_DIR,
     ai_image_studio_service,
 )
-from src.infrastructure.ai_image_typography import typography_engine
+from src.infrastructure.ai_image_typography import TypographyContent, typography_engine
+from src.infrastructure.image_typography_store import create_typography_template, get_typography_template
 from src.presentation.auth_deps import CurrentUser, get_current_user
 
 logger = logging.getLogger(__name__)
@@ -30,13 +32,16 @@ class UpdateImageStudioSettingsRequest(BaseModel):
     template_preset: Optional[str] = None
     font_family: Optional[str] = None
     model_name: Optional[str] = None
-    background_source: Optional[str] = Field(None, description="ai_gemini, pexels, pixabay, giphy, user_upload")
+    background_source: Optional[str] = Field(None, description="ai_gemini, pexels, pixabay, giphy, user_upload, design_clone")
     media_type: Optional[str] = Field(None, description="image, video_footage")
     auto_post_enabled: Optional[bool] = None
     target_account_ids: Optional[List[str]] = None
     music_enabled: Optional[bool] = None
     music_track: Optional[str] = None
     footage_duration_sec: Optional[int] = Field(None, ge=3, le=30)
+    content_mode: Optional[str] = Field(None, description="quote, news, both")
+    publish_mode: Optional[str] = Field(None, description="scheduled, always_update")
+    always_update_interval_min: Optional[int] = Field(None, ge=5, le=120)
 
 
 class InstantGenerateRequest(BaseModel):
@@ -63,6 +68,8 @@ class InstantGenerateRequest(BaseModel):
     music_artist: Optional[str] = None
     music_thumbnail: Optional[str] = None
     progress_token: Optional[str] = Field(None, max_length=100)
+    content_mode: Optional[str] = Field("quote", description="quote, news, both")
+    custom_background_path: Optional[str] = Field(None, description="local_path returned by /upload-media, for user_upload/design_clone background_source")
 
 
 class SuggestContentRequest(BaseModel):
@@ -128,6 +135,19 @@ class TriggerHermesRunRequest(BaseModel):
     topic_override: Optional[str] = None
     count_override: Optional[int] = Field(None, ge=1, le=10)
     progress_token: Optional[str] = Field(None, max_length=100)
+
+
+class DiscoverNewsRequest(BaseModel):
+    topics: Optional[List[str]] = None
+
+
+class CloneDesignRequest(BaseModel):
+    name: str = Field(..., min_length=2, max_length=100)
+    primary_font: str
+    secondary_font: str
+    recommended_accent: str
+    layout_type: str
+    vibe: Optional[str] = ""
 
 
 class SocialPublishRequest(BaseModel):
@@ -420,6 +440,8 @@ async def generate_instant(
             music_thumbnail=req.music_thumbnail,
             trigger_source="instant_studio",
             progress_token=req.progress_token,
+            content_mode=req.content_mode or "quote",
+            custom_background_path=req.custom_background_path,
         )
         return {
             "success": True,
@@ -462,6 +484,7 @@ async def trigger_hermes_session(
             music_id=str(music_track) if (music_track and str(music_track).isdigit()) else None,
             trigger_source="manual_trigger",
             progress_token=req.progress_token,
+            content_mode=settings_data.get("content_mode", "quote"),
         )
         return {
             "success": True,
@@ -559,6 +582,106 @@ async def publish_run_to_social(
         "success": status in ("scheduled", "partial"),
         "status": status,
         "details": details,
+    }
+
+
+@router.post("/discover-news")
+async def discover_news(
+    req: DiscoverNewsRequest,
+    user: CurrentUser = Depends(get_current_user),
+):
+    """Search real, current news/content across all configured Hermes topics
+    (or an explicit topic list), for preview before generating content."""
+    topics = req.topics
+    if not topics:
+        settings_data = ai_image_studio_service.get_settings(user_id=user.id)
+        topics = settings_data.get("topics") or []
+    if not topics:
+        raise HTTPException(status_code=400, detail="Tidak ada topik untuk dicari. Isi daftar topik Hermes terlebih dahulu.")
+
+    articles = await ai_image_studio_service.discover_news_for_topics(topics)
+    return {
+        "success": True,
+        "data": articles,
+    }
+
+
+@router.get("/news-queue")
+async def get_news_queue(user: CurrentUser = Depends(get_current_user)):
+    """List the Always Update news discovery queue (most recent first)."""
+    items = ai_image_studio_service.get_news_queue(user_id=user.id)
+    return {
+        "success": True,
+        "data": items,
+    }
+
+
+@router.get("/templates/{template_id}/preview.png")
+async def get_template_preview(template_id: str):
+    """Render (and cache) an actual visual preview PNG for a typography template,
+    using each layout's own built-in placeholder text — no hardcoded sample copy
+    here, it reuses whatever default text the renderer already falls back to."""
+    tpl = get_typography_template(template_id)
+    if not tpl:
+        raise HTTPException(status_code=404, detail="Template tidak ditemukan")
+
+    cache_key = f"{template_id}_{tpl.get('updated_at', '')}".replace(" ", "_").replace(":", "")
+    cache_path = os.path.join(PREVIEW_DIR, f"{cache_key}.png")
+
+    if not os.path.exists(cache_path):
+        content = TypographyContent(template=template_id, aspect_ratio="9:16")
+        rendered = typography_engine.render_overlay(None, content)
+        preview_w = 360
+        preview_h = int(rendered.height * (preview_w / rendered.width))
+        rendered = rendered.resize((preview_w, preview_h))
+        rendered.convert("RGB").save(cache_path, format="PNG")
+
+    return FileResponse(
+        cache_path,
+        media_type="image/png",
+        headers={"Cache-Control": "public, max-age=3600"},
+    )
+
+
+@router.post("/analyze-design")
+async def analyze_design(
+    file: UploadFile = File(...),
+    user: CurrentUser = Depends(get_current_user),
+):
+    """Upload a reference design image and have AI extract its style (typography
+    feel, accent color, closest layout) — mapped only to fonts/layouts that
+    already exist in this app, never invented."""
+    content = await file.read()
+    try:
+        analysis = await ai_image_studio_service.analyze_design_reference(content)
+    except Exception as e:
+        logger.error(f"[AIImageStudio] Design reference analysis failed: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Analisis desain gagal: {e}")
+    return {
+        "success": True,
+        "data": analysis,
+    }
+
+
+@router.post("/clone-design")
+async def clone_design(
+    req: CloneDesignRequest,
+    user: CurrentUser = Depends(get_current_user),
+):
+    """Save an analyzed design reference as a new reusable custom template preset."""
+    tpl = create_typography_template({
+        "name": req.name,
+        "vibe": req.vibe or f"Preset hasil Clone Design: {req.name}",
+        "primary_font": req.primary_font,
+        "secondary_font": req.secondary_font,
+        "recommended_accent": req.recommended_accent,
+        "layout_type": req.layout_type,
+        "is_builtin": False,
+    })
+    return {
+        "success": True,
+        "message": f"Preset '{tpl.get('name')}' berhasil disimpan dari Clone Design",
+        "data": tpl,
     }
 
 
