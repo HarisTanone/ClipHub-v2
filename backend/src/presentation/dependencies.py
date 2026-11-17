@@ -3,8 +3,8 @@ import logging
 from functools import lru_cache
 
 from src.application.services import JobService
+from src.config import settings
 from src.infrastructure.downloader import YouTubeDownloader
-from src.infrastructure.gemini_analyzer import GeminiAnalyzer
 from src.infrastructure.renderer import FFmpegRenderer
 from src.infrastructure.repositories import JobRepository
 from src.infrastructure.validator import ClipValidator
@@ -91,10 +91,19 @@ def get_job_service() -> JobService:
     from src.infrastructure.remotion_adapter import RemotionAdapter
     remotion_adapter = _safe_import(RemotionAdapter, "RemotionAdapter")
 
+    # ─── Gemini Analyzer (only if ENABLE_GEMINI_VIDEO_ANALYSIS=true) ──────
+    # When disabled, we pass None and the V2 pipeline (GroqAnalyzer) handles analysis
+    gemini_analyzer = None
+    if settings.ENABLE_GEMINI_VIDEO_ANALYSIS:
+        from src.infrastructure.gemini_analyzer import GeminiAnalyzer
+        gemini_analyzer = _safe_import(GeminiAnalyzer, "GeminiAnalyzer")
+    else:
+        logger.info("[DI] GeminiAnalyzer skipped (ENABLE_GEMINI_VIDEO_ANALYSIS=false)")
+
     return JobService(
         job_repo=JobRepository(),
         downloader=YouTubeDownloader(),
-        gemini_analyzer=GeminiAnalyzer(),
+        gemini_analyzer=gemini_analyzer,
         whisper_local=WhisperLocal(),
         renderer=FFmpegRenderer(),
         validator=ClipValidator(),

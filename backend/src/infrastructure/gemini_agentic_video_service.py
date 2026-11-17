@@ -5,6 +5,11 @@ Files API and is NOT proxied by 9router. This service is the exception to the
 "9router-only" policy — for text chat completions we strictly go through
 9router, but for true video understanding Gemini is still required. All other
 AI text paths in the backend MUST use 9router.
+
+FEATURE FLAG: ENABLE_GEMINI_VIDEO_ANALYSIS
+When disabled (default: False), all methods return fallback/heuristic results
+without calling the Gemini API. This allows the pipeline to continue working
+when Gemini quota is exhausted.
 """
 from __future__ import annotations
 
@@ -16,12 +21,17 @@ import re
 import time
 from typing import Any, Optional
 
-from google import genai
-from google.genai import types
-
 from src.config import settings
 
 logger = logging.getLogger(__name__)
+
+
+def _gemini_agentic_disabled_warning(method_name: str) -> None:
+    """Log warning when Gemini agentic video service is disabled."""
+    logger.warning(
+        f"[GeminiAgenticVideoService.{method_name}] ENABLE_GEMINI_VIDEO_ANALYSIS=false. "
+        f"Returning heuristic fallback. Use V2 pipeline with text-based analysis for full functionality."
+    )
 
 ALIGNMENT_AGENTIC_PROMPT = """You are an expert film director and short-form video editor conducting Gemini Video Understanding.
 Your mission is to dynamically inspect this video's timeline, audio, and visual moments to determine how well it aligns with a specific scene in our vertical (9:16) short-form video.
@@ -65,6 +75,17 @@ class GeminiAgenticVideoService:
     }
 
     def __init__(self):
+        # Check feature flag first
+        if not settings.ENABLE_GEMINI_VIDEO_ANALYSIS:
+            logger.info(
+                "[GeminiAgenticVideoService] DISABLED (ENABLE_GEMINI_VIDEO_ANALYSIS=false). "
+                "Methods will return heuristic fallbacks."
+            )
+            self._key_rotator = None
+            self._model = settings.GEMINI_MODEL or "gemini-3.8-flash"
+            self._fallback_model = settings.GEMINI_FALLBACK_MODEL or "gemini-3.7-flash"
+            return
+
         from src.infrastructure.auth import get_gemini_key_rotator
         self._key_rotator = get_gemini_key_rotator()
         self._model = settings.GEMINI_MODEL or "gemini-3.8-flash"
@@ -87,7 +108,26 @@ class GeminiAgenticVideoService:
         """Analyze a video file/URL using Gemini Video Understanding (File API, Inline Data, or YouTube URL).
 
         Inspects the video dynamically or statically, verifies narrative alignment, and extracts the best continuous timestamp.
+
+        When ENABLE_GEMINI_VIDEO_ANALYSIS=false, returns heuristic fallback immediately.
         """
+        # Check feature flag first — return heuristic fallback immediately
+        if not settings.ENABLE_GEMINI_VIDEO_ANALYSIS:
+            _gemini_agentic_disabled_warning("analyze_footage_alignment")
+            return {
+                "is_relevant": True,
+                "alignment_score": 7.0,
+                "best_start_timestamp": 0.0,
+                "best_end_timestamp": target_duration,
+                "best_start_mm_ss": "00:00",
+                "best_end_mm_ss": f"{int(target_duration//60):02d}:{int(target_duration%60):02d}",
+                "visual_summary": "Heuristic fallback (Gemini disabled)",
+                "reasoning": "ENABLE_GEMINI_VIDEO_ANALYSIS=false, using default timestamps",
+                "processing_mode": processing_mode,
+                "media_resolution": media_resolution,
+                "_gemini_disabled": True,
+            }
+
         is_url = (
             video_path.startswith("http://")
             or video_path.startswith("https://")
@@ -107,7 +147,7 @@ class GeminiAgenticVideoService:
                 "media_resolution": media_resolution,
             }
 
-        keys = self._key_rotator.get_available_keys()
+        keys = self._key_rotator.get_available_keys() if self._key_rotator else []
         if not keys:
             logger.warning("[GeminiAgenticVideo] No Gemini API key configured, using default timestamps")
             return {
@@ -158,8 +198,26 @@ class GeminiAgenticVideoService:
         end_offset: Optional[float] = None,
     ) -> dict[str, Any]:
         """Synchronous worker for Video Understanding via Interactions API or Files API."""
+        # Feature flag check
+        if not settings.ENABLE_GEMINI_VIDEO_ANALYSIS:
+            return {
+                "is_relevant": True,
+                "alignment_score": 7.0,
+                "best_start_timestamp": 0.0,
+                "best_end_timestamp": target_duration,
+                "best_start_mm_ss": "00:00",
+                "best_end_mm_ss": f"{int(target_duration//60):02d}:{int(target_duration%60):02d}",
+                "visual_summary": "Heuristic fallback (Gemini disabled)",
+                "reasoning": "ENABLE_GEMINI_VIDEO_ANALYSIS=false",
+                "processing_mode": processing_mode,
+                "media_resolution": media_resolution,
+            }
+
         import base64
-        keys = self._key_rotator.get_available_keys()
+        from google import genai
+        from google.genai import types
+
+        keys = self._key_rotator.get_available_keys() if self._key_rotator else []
         # Agentic video mode is officially supported on:
         # Gemini 3.8 Flash, 3.7 Flash, 3.6 Flash, 2.5 Flash
         AGENTIC_SUPPORTED_MODELS = {
@@ -532,7 +590,10 @@ class GeminiAgenticVideoService:
         context: str = "",
         placement: str = "behind_person",
     ) -> list[str]:
-        """Use Gemini Agentic Subtitle Reasoning to generate concrete English visual stock queries."""
+        """Use Gemini Agentic Subtitle Reasoning to generate concrete English visual stock queries.
+
+        When ENABLE_GEMINI_VIDEO_ANALYSIS=false, returns heuristic fallback queries immediately.
+        """
         sub = (subtitle_text or "").strip()
         ctx = (context or "").strip()
         kw = (keyword or "").strip()
@@ -541,8 +602,16 @@ class GeminiAgenticVideoService:
         if not combined_speech and not kw:
             return []
 
-        keys = self._key_rotator.get_available_keys()
+        # Feature flag check — return heuristic fallback immediately
+        if not settings.ENABLE_GEMINI_VIDEO_ANALYSIS:
+            _gemini_agentic_disabled_warning("derive_contextual_queries")
+            return self._fallback_heuristic_queries(kw, combined_speech)
+
+        keys = self._key_rotator.get_available_keys() if self._key_rotator else []
         if keys:
+            from google import genai
+            from google.genai import types
+
             prompt = f"""Kamu visual researcher & director video pendek profesional dengan kemampuan Agentic Video Understanding.
 Tugasmu adalah menganalisa ucapan pembicara pada potongan video berikut, memahami konteks topiknya secara mendalam, dan merumuskan 3-4 kueri pencarian video stock bahasa Inggris (Pexels/Pixabay) yang SANGAT KONKRET dan RELEVAN untuk ditampilkan sebagai B-roll ({placement}).
 

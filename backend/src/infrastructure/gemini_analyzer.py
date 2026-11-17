@@ -14,15 +14,16 @@ highlight_analyzer, all of which have been migrated.
 This module raises when ALLOW_DIRECT_PROVIDER_FALLBACKS=false AND no Gemini
 key is configured, so a deployment that wants strict 9router-only text
 generation can leave video understanding off.
+
+FEATURE FLAG: ENABLE_GEMINI_VIDEO_ANALYSIS
+When disabled (default: False), all analysis methods return empty/fallback
+results and log a warning. Use text-based analysis via V2 pipeline instead.
 """
 import asyncio
 import json
 import logging
 import time
 from typing import Optional
-
-from google import genai
-from google.genai import types
 
 from src.config import settings
 from src.domain.interfaces import IGeminiAnalyzer
@@ -31,6 +32,14 @@ logger = logging.getLogger(__name__)
 
 RETRY_DELAYS = [5, 15, 30]
 MAX_RETRIES = 3
+
+
+def _gemini_video_disabled_warning(method_name: str) -> None:
+    """Log warning when Gemini video analysis is disabled."""
+    logger.warning(
+        f"[GeminiAnalyzer.{method_name}] ENABLE_GEMINI_VIDEO_ANALYSIS=false. "
+        f"Gemini video understanding is disabled. Use V2 pipeline with text-based analysis instead."
+    )
 
 
 class InteractionResponseAdapter:
@@ -42,6 +51,22 @@ class InteractionResponseAdapter:
 
 class GeminiAnalyzer(IGeminiAnalyzer):
     def __init__(self):
+        # Check feature flag first
+        if not settings.ENABLE_GEMINI_VIDEO_ANALYSIS:
+            logger.info(
+                "gemini_analyzer_init: DISABLED (ENABLE_GEMINI_VIDEO_ANALYSIS=false). "
+                "Use V2 pipeline with text-based analysis via 9router instead."
+            )
+            self._key_rotator = None
+            self._client = None
+            self._model = settings.GEMINI_MODEL
+            self._fallback_model = settings.GEMINI_FALLBACK_MODEL
+            self._video_processing = getattr(settings, "GEMINI_VIDEO_PROCESSING", "agentic")
+            self._using_fallback = False
+            self._consecutive_503 = 0
+            return
+
+        from google import genai
         from src.infrastructure.auth import get_gemini_key_rotator
         self._key_rotator = get_gemini_key_rotator()
         self._model = settings.GEMINI_MODEL
@@ -58,6 +83,9 @@ class GeminiAnalyzer(IGeminiAnalyzer):
 
     def _switch_to_fallback(self) -> None:
         """Switch to next fallback model after repeated 503/overload/404 errors."""
+        if not settings.ENABLE_GEMINI_VIDEO_ANALYSIS:
+            return
+
         cascade = [
             settings.GEMINI_MODEL or "gemini-3.8-flash",
             settings.GEMINI_FALLBACK_MODEL or "gemini-3.7-flash",
@@ -87,6 +115,11 @@ class GeminiAnalyzer(IGeminiAnalyzer):
             logger.warning(f"All {len(models)} Gemini fallback models in cascade exhausted (last: {self._model})")
 
     def _init_client(self) -> None:
+        if not settings.ENABLE_GEMINI_VIDEO_ANALYSIS:
+            self._client = None
+            return
+
+        from google import genai
         key = self._key_rotator.get_current_key()
         if key:
             self._client = genai.Client(api_key=key)
@@ -102,7 +135,20 @@ class GeminiAnalyzer(IGeminiAnalyzer):
         Phase 2: Text refinement → optimized hooks + b-roll placement
 
         Returns combined result dict.
+
+        When ENABLE_GEMINI_VIDEO_ANALYSIS=false, returns empty fallback result.
         """
+        # Check feature flag
+        if not settings.ENABLE_GEMINI_VIDEO_ANALYSIS:
+            _gemini_video_disabled_warning("analyze")
+            return {
+                "clips": [],
+                "creative_direction": {},
+                "broll_suggestions": {},
+                "_gemini_disabled": True,
+                "_fallback_reason": "ENABLE_GEMINI_VIDEO_ANALYSIS=false",
+            }
+
         loop = asyncio.get_event_loop()
         return await loop.run_in_executor(
             None, self._analyze_multi_phase, video_url, video_duration, max_clips
@@ -298,6 +344,12 @@ OUTPUT FORMAT — RAW JSON (tanpa markdown):
 
     def _call_with_retry(self, video_url: str, prompt: str) -> str:
         """Call Gemini with YouTube URL as video content + text prompt across all keys concurrently."""
+        if not settings.ENABLE_GEMINI_VIDEO_ANALYSIS:
+            raise RuntimeError("Gemini video analysis is disabled (ENABLE_GEMINI_VIDEO_ANALYSIS=false)")
+
+        from google import genai
+        from google.genai import types
+
         for attempt in range(MAX_RETRIES):
             try:
                 response = self._generate_with_video(video_url, prompt, timeout=180)
@@ -346,6 +398,11 @@ OUTPUT FORMAT — RAW JSON (tanpa markdown):
 
     def _call_text_only(self, prompt: str, timeout: int = 60) -> str:
         """Call Gemini with text-only prompt racing across all keys and top models concurrently."""
+        if not settings.ENABLE_GEMINI_VIDEO_ANALYSIS:
+            raise RuntimeError("Gemini video analysis is disabled (ENABLE_GEMINI_VIDEO_ANALYSIS=false)")
+
+        from google import genai
+        from google.genai import types
         from concurrent.futures import ThreadPoolExecutor, as_completed, TimeoutError as FuturesTimeout
 
         keys = self._key_rotator.get_available_keys() or settings.gemini_api_keys
@@ -394,7 +451,7 @@ OUTPUT FORMAT — RAW JSON (tanpa markdown):
             raise errors[-1]
         raise ValueError("Respons Gemini kosong dari semua key dan model (text-only)")
 
-    def _resolve_video_source(self, client: genai.Client, video_url: str) -> tuple[str, Optional[str]]:
+    def _resolve_video_source(self, client, video_url: str) -> tuple[str, Optional[str]]:
         """Resolve video input to (uri, mime_type).
 
         Handles:
@@ -402,6 +459,9 @@ OUTPUT FORMAT — RAW JSON (tanpa markdown):
         2. Local disk video files: Uploads to Gemini File API and waits for PROCESSING -> ACTIVE.
         """
         import os
+        if not settings.ENABLE_GEMINI_VIDEO_ANALYSIS:
+            return video_url, "video/mp4"
+
         if video_url.startswith("http://") or video_url.startswith("https://") or video_url.startswith("gs://"):
             return video_url, "video/mp4"
 
@@ -424,6 +484,11 @@ OUTPUT FORMAT — RAW JSON (tanpa markdown):
         Supports Agentic Video Understanding (dynamic timeline inspection, up to 88% token reduction)
         with automatic fallback to static generate_content.
         """
+        if not settings.ENABLE_GEMINI_VIDEO_ANALYSIS:
+            raise RuntimeError("Gemini video analysis is disabled (ENABLE_GEMINI_VIDEO_ANALYSIS=false)")
+
+        from google import genai
+        from google.genai import types
         from concurrent.futures import ThreadPoolExecutor, as_completed, TimeoutError as FuturesTimeout
 
         keys = self._key_rotator.get_available_keys() or settings.gemini_api_keys

@@ -96,7 +96,7 @@ class JobService:
         self,
         job_repo: IJobRepository,
         downloader: IDownloader,
-        gemini_analyzer: IGeminiAnalyzer,
+        gemini_analyzer: Optional[IGeminiAnalyzer],
         whisper_local: IWhisperLocal,
         renderer: IRenderer,
         validator: IValidator,

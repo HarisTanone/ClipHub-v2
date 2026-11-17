@@ -155,7 +155,23 @@ class StoryAgent:
         instructions: str = "",
         use_agentic: bool = True,
     ) -> dict:
-        """Analyze a source video with Gemini Agentic Video Understanding to generate structured scenes."""
+        """Analyze a source video with Gemini Agentic Video Understanding to generate structured scenes.
+
+        When ENABLE_GEMINI_VIDEO_ANALYSIS=false, raises RuntimeError with guidance to use text-based story generation.
+        """
+        from src.config import settings
+
+        # Check feature flag first
+        if not settings.ENABLE_GEMINI_VIDEO_ANALYSIS:
+            logger.warning(
+                f"story_agent: ENABLE_GEMINI_VIDEO_ANALYSIS=false. "
+                f"Gemini video understanding is disabled. Use generate_story() with topic instead."
+            )
+            raise RuntimeError(
+                "Gemini video analysis is disabled (ENABLE_GEMINI_VIDEO_ANALYSIS=false). "
+                "Use generate_story() with topic/text-based story generation instead."
+            )
+
         from src.infrastructure.gemini_analyzer import GeminiAnalyzer
 
         if not target_duration:

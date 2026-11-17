@@ -11,6 +11,12 @@ from src.infrastructure.gemini_analyzer import (
 )
 from src.presentation.routes.settings import SystemInfo
 
+# Skip marker for tests that require ENABLE_GEMINI_VIDEO_ANALYSIS=true
+requires_gemini_enabled = pytest.mark.skipif(
+    not settings.ENABLE_GEMINI_VIDEO_ANALYSIS,
+    reason="Requires ENABLE_GEMINI_VIDEO_ANALYSIS=true"
+)
+
 
 class TestGeminiAgenticVideo(unittest.TestCase):
     def setUp(self):
@@ -37,6 +43,7 @@ class TestGeminiAgenticVideo(unittest.TestCase):
         self.assertEqual(mime, "video/mp4")
         mock_client.files.upload.assert_not_called()
 
+    @requires_gemini_enabled
     def test_resolve_video_source_local_file(self):
         mock_client = MagicMock()
         mock_file = MagicMock()
@@ -51,6 +58,7 @@ class TestGeminiAgenticVideo(unittest.TestCase):
             self.assertEqual(mime, "video/mp4")
             mock_client.files.upload.assert_called_once_with(file="/path/to/local.mp4")
 
+    @requires_gemini_enabled
     @patch("src.config.settings.GEMINI_API_KEY", "test_key_1")
     @patch("src.config.settings.GEMINI_VIDEO_PROCESSING", "agentic")
     @patch("src.config.settings.GEMINI_MODEL", "gemini-3.7-flash")
@@ -87,6 +95,7 @@ class TestGeminiAgenticVideo(unittest.TestCase):
             self.assertEqual(call_kwargs["input"][0]["processing"], "agentic")
             self.assertEqual(call_kwargs["input"][0]["type"], "video")
 
+    @requires_gemini_enabled
     @patch("src.config.settings.GEMINI_API_KEY", "test_key_1")
     @patch("src.config.settings.GEMINI_VIDEO_PROCESSING", "agentic")
     @patch("src.config.settings.GEMINI_MODEL", "gemini-3.7-flash")
@@ -119,6 +128,7 @@ class TestGeminiAgenticVideo(unittest.TestCase):
             self.assertIsNotNone(res)
             self.assertEqual(res.text, '{"clips": [{"rank": 1, "score": 90}]}')
 
+    @requires_gemini_enabled
     @patch("src.config.settings.GEMINI_API_KEY", "test_key_1")
     @patch("src.config.settings.GEMINI_VIDEO_PROCESSING", "agentic")
     @patch("src.config.settings.GEMINI_MODEL", "gemini-3.7-flash")
@@ -166,6 +176,8 @@ class TestGeminiAgenticVideo(unittest.TestCase):
         dumped = info.model_dump()
         self.assertEqual(dumped["gemini_video_processing"], "agentic")
 
+
+@requires_gemini_enabled
 @pytest.mark.asyncio
 async def test_agentic_video_service_derive_queries_with_gemini():
     from src.infrastructure.gemini_agentic_video_service import GeminiAgenticVideoService
@@ -194,9 +206,12 @@ async def test_agentic_video_service_derive_queries_with_gemini():
 
 @pytest.mark.asyncio
 async def test_agentic_video_service_derive_queries_heuristic_fallback():
+    """Test heuristic fallback when Gemini is disabled or no keys available."""
     from src.infrastructure.gemini_agentic_video_service import GeminiAgenticVideoService
     service = GeminiAgenticVideoService()
-    service._key_rotator._keys = []
+    # Force key_rotator to have no keys (or it's None when ENABLE_GEMINI_VIDEO_ANALYSIS=false)
+    if service._key_rotator:
+        service._key_rotator._keys = []
 
     queries = await service.derive_contextual_queries(
         keyword="bisnis",
@@ -260,6 +275,7 @@ def test_gemini_key_rotator_behavior():
     rotator.reset()
 
 
+@requires_gemini_enabled
 def test_agentic_video_service_auto_rotates_on_429(tmp_path):
     from src.infrastructure.gemini_agentic_video_service import GeminiAgenticVideoService
     from src.infrastructure.auth import GeminiKeyRotator
