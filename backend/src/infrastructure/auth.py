@@ -198,12 +198,17 @@ class GeminiKeyRotator:
     _shared_rate_limited: dict[str, tuple[datetime, float]] = {}  # key -> (limited_at, cooldown_seconds)
     _lock = threading.Lock()
 
-    def __init__(self, keys: Optional[list[str]] = None, cooldown_seconds: float = 60.0):
+    def __init__(self, keys: Optional[list[str]] = None, cooldown_seconds: float = 60.0, _skip_logging: bool = False):
         if keys is not None:
             self._keys = list(keys)
         else:
             self._keys = None
         self._cooldown_seconds = cooldown_seconds
+        self._skip_logging = _skip_logging
+
+        # Skip logging when Gemini feature is disabled (clean startup logs)
+        if _skip_logging:
+            return
 
         current_keys = self.keys
         if current_keys:
@@ -413,8 +418,17 @@ _shared_rotator_instance: Optional[GeminiKeyRotator] = None
 
 
 def get_gemini_key_rotator() -> GeminiKeyRotator:
-    """Get the process-wide singleton GeminiKeyRotator instance."""
+    """Get the process-wide singleton GeminiKeyRotator instance.
+    
+    When ENABLE_GEMINI_VIDEO_ANALYSIS=false, returns a minimal no-op rotator
+    without loading keys or emitting log lines.
+    """
     global _shared_rotator_instance
     if _shared_rotator_instance is None:
-        _shared_rotator_instance = GeminiKeyRotator()
+        # Check feature flag — skip key loading & logging when Gemini disabled
+        if not settings.ENABLE_GEMINI_VIDEO_ANALYSIS:
+            # Create minimal rotator with empty keys and no logging
+            _shared_rotator_instance = GeminiKeyRotator(keys=[], _skip_logging=True)
+        else:
+            _shared_rotator_instance = GeminiKeyRotator()
     return _shared_rotator_instance

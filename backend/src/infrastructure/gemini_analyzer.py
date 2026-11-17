@@ -51,21 +51,20 @@ class InteractionResponseAdapter:
 
 class GeminiAnalyzer(IGeminiAnalyzer):
     def __init__(self):
-        # Check feature flag first
+        # Check feature flag first — skip ALL initialization when disabled
         if not settings.ENABLE_GEMINI_VIDEO_ANALYSIS:
-            logger.info(
-                "gemini_analyzer_init: DISABLED (ENABLE_GEMINI_VIDEO_ANALYSIS=false). "
-                "Use V2 pipeline with text-based analysis via 9router instead."
-            )
+            # Minimal state — no logging, no key loading, no external imports
             self._key_rotator = None
             self._client = None
-            self._model = settings.GEMINI_MODEL
-            self._fallback_model = settings.GEMINI_FALLBACK_MODEL
-            self._video_processing = getattr(settings, "GEMINI_VIDEO_PROCESSING", "agentic")
+            self._model = ""
+            self._fallback_model = ""
+            self._video_processing = ""
             self._using_fallback = False
             self._consecutive_503 = 0
+            self._disabled = True
             return
 
+        self._disabled = False
         from google import genai
         from src.infrastructure.auth import get_gemini_key_rotator
         self._key_rotator = get_gemini_key_rotator()

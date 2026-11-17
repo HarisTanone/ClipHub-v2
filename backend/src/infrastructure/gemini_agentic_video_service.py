@@ -75,17 +75,16 @@ class GeminiAgenticVideoService:
     }
 
     def __init__(self):
-        # Check feature flag first
+        # Check feature flag first — skip ALL initialization when disabled
         if not settings.ENABLE_GEMINI_VIDEO_ANALYSIS:
-            logger.info(
-                "[GeminiAgenticVideoService] DISABLED (ENABLE_GEMINI_VIDEO_ANALYSIS=false). "
-                "Methods will return heuristic fallbacks."
-            )
+            # Minimal state — no logging, no key loading, no external imports
             self._key_rotator = None
-            self._model = settings.GEMINI_MODEL or "gemini-3.8-flash"
-            self._fallback_model = settings.GEMINI_FALLBACK_MODEL or "gemini-3.7-flash"
+            self._model = ""
+            self._fallback_model = ""
+            self._disabled = True
             return
 
+        self._disabled = False
         from src.infrastructure.auth import get_gemini_key_rotator
         self._key_rotator = get_gemini_key_rotator()
         self._model = settings.GEMINI_MODEL or "gemini-3.8-flash"

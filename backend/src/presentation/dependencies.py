@@ -46,8 +46,6 @@ def get_job_service() -> JobService:
 
     # ─── Infrastructure Components ────────────────────────────────────────
     from src.infrastructure.cleanup_manager import CleanupManager
-    from src.infrastructure.gemini_retry_handler import GeminiRetryHandler
-    from src.infrastructure.gemini_rate_limiter import GeminiRateLimiter
     from src.infrastructure.resource_monitor import ResourceMonitor
     from src.infrastructure.ffprobe_validator import FFprobeValidator
     from src.infrastructure.overlap_detector import OverlapDetector
@@ -74,8 +72,6 @@ def get_job_service() -> JobService:
 
     # ─── Infrastructure ───────────────────────────────────────────────────
     cleanup_manager = _safe_import(CleanupManager, "CleanupManager")
-    gemini_retry_handler = _safe_import(GeminiRetryHandler, "GeminiRetryHandler")
-    gemini_rate_limiter = _safe_import(GeminiRateLimiter, "GeminiRateLimiter")
     resource_monitor = _safe_import(ResourceMonitor, "ResourceMonitor")
     ffprobe_validator = _safe_import(FFprobeValidator, "FFprobeValidator")
     overlap_detector = _safe_import(OverlapDetector, "OverlapDetector")
@@ -87,18 +83,21 @@ def get_job_service() -> JobService:
     batch_highlight = _safe_import(BatchHighlightProcessor, "BatchHighlightProcessor")
     asset_fetcher = _safe_import(AssetFetcher, "AssetFetcher")
 
+    # ─── Gemini-specific components (only when ENABLE_GEMINI_VIDEO_ANALYSIS=true) ─
+    gemini_retry_handler = None
+    gemini_rate_limiter = None
+    gemini_analyzer = None
+    if settings.ENABLE_GEMINI_VIDEO_ANALYSIS:
+        from src.infrastructure.gemini_retry_handler import GeminiRetryHandler
+        from src.infrastructure.gemini_rate_limiter import GeminiRateLimiter
+        from src.infrastructure.gemini_analyzer import GeminiAnalyzer
+        gemini_retry_handler = _safe_import(GeminiRetryHandler, "GeminiRetryHandler")
+        gemini_rate_limiter = _safe_import(GeminiRateLimiter, "GeminiRateLimiter")
+        gemini_analyzer = _safe_import(GeminiAnalyzer, "GeminiAnalyzer")
+
     # ─── Remotion Integration (ALWAYS enabled for hook+subtitle) ──────
     from src.infrastructure.remotion_adapter import RemotionAdapter
     remotion_adapter = _safe_import(RemotionAdapter, "RemotionAdapter")
-
-    # ─── Gemini Analyzer (only if ENABLE_GEMINI_VIDEO_ANALYSIS=true) ──────
-    # When disabled, we pass None and the V2 pipeline (GroqAnalyzer) handles analysis
-    gemini_analyzer = None
-    if settings.ENABLE_GEMINI_VIDEO_ANALYSIS:
-        from src.infrastructure.gemini_analyzer import GeminiAnalyzer
-        gemini_analyzer = _safe_import(GeminiAnalyzer, "GeminiAnalyzer")
-    else:
-        logger.info("[DI] GeminiAnalyzer skipped (ENABLE_GEMINI_VIDEO_ANALYSIS=false)")
 
     return JobService(
         job_repo=JobRepository(),
