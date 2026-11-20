@@ -213,6 +213,7 @@ async def lifespan(app: FastAPI):
     from src.infrastructure.autopilot_service import autopilot_service
     from src.infrastructure.hermes_videogen_service import hermes_videogen_service
     from src.infrastructure.ai_image_studio_service import ai_image_studio_service
+    from src.infrastructure.storage_cleanup_service import storage_cleanup_service
     alerting_task = asyncio.create_task(
         _alerting_service.monitor_loop(get_queue_depth=lambda: _job_queue.pending_count)
     )
@@ -220,9 +221,10 @@ async def lifespan(app: FastAPI):
     autopilot_task = asyncio.create_task(autopilot_service.start_scheduler_loop())
     hermes_videogen_task = asyncio.create_task(hermes_videogen_service.start_scheduler_loop())
     image_studio_task = asyncio.create_task(ai_image_studio_service.start_scheduler_loop())
+    storage_cleanup_task = asyncio.create_task(storage_cleanup_service.start_auto_clear_loop())
 
     logger.info("Server started — local pipeline mode")
-    logger.info("Background tasks started: AlertingService, AutoScaleAdvisor, AutopilotDaemon, HermesVideoGenDaemon, AIImageStudioDaemon")
+    logger.info("Background tasks started: AlertingService, AutoScaleAdvisor, AutopilotDaemon, HermesVideoGenDaemon, AIImageStudioDaemon, StorageCleanupDaemon")
 
     yield
 
@@ -232,7 +234,8 @@ async def lifespan(app: FastAPI):
     autopilot_task.cancel()
     hermes_videogen_task.cancel()
     image_studio_task.cancel()
-    for task in (alerting_task, auto_scale_task, autopilot_task, hermes_videogen_task, image_studio_task):
+    storage_cleanup_task.cancel()
+    for task in (alerting_task, auto_scale_task, autopilot_task, hermes_videogen_task, image_studio_task, storage_cleanup_task):
         try:
             await task
         except asyncio.CancelledError:
